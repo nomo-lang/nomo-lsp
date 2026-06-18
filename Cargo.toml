@@ -1,0 +1,16 @@
+[package]
+name = "nomo-lsp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Language Server Protocol implementation for the Nomo programming language"
+
+[[bin]]
+name = "nomo-lsp"
+path = "src/main.rs"
+
+[dependencies]
+nomo = { path = "../nomo" }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
+dashmap = "6"

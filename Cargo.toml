@@ -10,7 +10,7 @@ name = "nomo-lsp"
 path = "src/main.rs"
 
 [dependencies]
-nomo = { path = "../nomo" }
+nomo = { git = "https://github.com/nomo-lang/nomo.git", branch = "main" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
 dashmap = "6"

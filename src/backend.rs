@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
@@ -38,10 +38,7 @@ impl Backend {
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.path()));
 
-        let diagnostics = match nomo::check_source_text(&path, text) {
-            Ok(_) => Vec::new(),
-            Err(diag) => vec![to_lsp_diagnostic(&diag)],
-        };
+        let diagnostics = diagnostics_for_text(&path, text);
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
@@ -111,7 +108,10 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
-        if let Some(text) = params.text.or_else(|| self.documents.get(&uri).map(|t| t.clone())) {
+        if let Some(text) = params
+            .text
+            .or_else(|| self.documents.get(&uri).map(|t| t.clone()))
+        {
             self.documents.insert(uri.clone(), text.clone());
             self.analyze(uri, &text).await;
         }
@@ -153,6 +153,39 @@ impl LanguageServer for Backend {
     }
 }
 
+fn diagnostics_for_text(path: &Path, text: &str) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let external_import_roots = external_import_roots_for_path(path).unwrap_or_default();
+    match nomo::check_source_text_with_external_imports(path, text, &external_import_roots) {
+        Ok(_) => Vec::new(),
+        Err(diag) => vec![to_lsp_diagnostic(&diag)],
+    }
+}
+
+fn external_import_roots_for_path(path: &Path) -> std::result::Result<Vec<String>, String> {
+    let Some(search_root) = path.parent() else {
+        return Ok(Vec::new());
+    };
+    let Some(manifest_root) = find_manifest_root(search_root) else {
+        return Ok(Vec::new());
+    };
+    let manifest = nomo::project::parse_manifest_at_root(&manifest_root)?;
+    Ok(manifest
+        .dependencies
+        .into_iter()
+        .map(|dependency| dependency.alias)
+        .filter(|alias| alias != "std")
+        .collect())
+}
+
+fn find_manifest_root(start: &Path) -> Option<PathBuf> {
+    for candidate in start.ancestors() {
+        if candidate.join("nomo.toml").exists() {
+            return Some(candidate.to_path_buf());
+        }
+    }
+    None
+}
+
 /// Convert a compiler diagnostic (1-based line/column) into an LSP diagnostic
 /// (0-based positions).
 fn to_lsp_diagnostic(diag: &NomoDiagnostic) -> tower_lsp::lsp_types::Diagnostic {
@@ -179,5 +212,63 @@ fn to_lsp_diagnostic(diag: &NomoDiagnostic) -> tower_lsp::lsp_types::Diagnostic 
         related_information: None,
         tags: None,
         data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn diagnostics_accept_dependency_alias_imports_from_nearest_manifest() {
+        let root = temp_test_root("alias-imports");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\njson = { package = \"nomo-lang/json\", version = \"0.1.0\" }\n",
+        )
+        .unwrap();
+        let source = project.join("src/main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_reject_dependency_alias_imports_without_manifest() {
+        let root = temp_test_root("alias-imports-no-manifest");
+        reset_dir(&root);
+        let source = root.join("main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("json.parser"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn reset_dir(path: &Path) {
+        if path.exists() {
+            fs::remove_dir_all(path).unwrap();
+        }
+        fs::create_dir_all(path).unwrap();
+    }
+
+    fn temp_test_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "nomo-lsp-backend-test-{name}-{}",
+            std::process::id()
+        ))
     }
 }

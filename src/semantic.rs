@@ -93,10 +93,7 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         TokenKind::Ident(name) => {
             let len = name.chars().count() as u32;
             // Treat capitalized identifiers as types (structs, enums, generics).
-            let starts_upper = name
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_uppercase());
+            let starts_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
             if starts_upper {
                 Some((TYPE, len))
             } else {
@@ -114,10 +111,9 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         | TokenKind::Less
         | TokenKind::Greater
         | TokenKind::Question => Some((OPERATOR, 1)),
-        TokenKind::LessEqual
-        | TokenKind::GreaterEqual
-        | TokenKind::Arrow
-        | TokenKind::FatArrow => Some((OPERATOR, 2)),
+        TokenKind::LessEqual | TokenKind::GreaterEqual | TokenKind::Arrow | TokenKind::FatArrow => {
+            Some((OPERATOR, 2))
+        }
         _ => None,
     }
 }

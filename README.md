@@ -11,6 +11,7 @@ exactly the ones the compiler produces.
 ## Features
 
 - Real-time diagnostics from the Nomo compiler front-end
+- Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
 - Keyword completion
 - Semantic highlighting tokens
@@ -43,6 +44,12 @@ cargo install --path .
 
 Most editor extensions look up `nomo-lsp` on the `PATH`. The server speaks LSP
 over stdio.
+
+Diagnostics use the same compiler API as project-level `nomo check`: for a file
+inside a project, `nomo-lsp` walks up to the nearest `nomo.toml`, reads declared
+dependency aliases, and accepts imports such as `import json.parser` only when
+`json` is declared in the manifest. Standalone files without a manifest keep the
+single-file `nomoc` behavior and only accept built-in `std.*` imports.
 
 ## Development
 

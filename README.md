@@ -17,6 +17,7 @@ exactly the ones the compiler produces.
 - Hover for current-document declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
 - Go-to-definition for current-document declarations
+- Find references for current-document declarations
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -71,6 +72,10 @@ views for top-level structs, enums, constants, functions, and methods.
 Go-to-definition currently resolves references to declarations in the same open
 document. Cross-module and workspace-wide definition lookup are planned as the
 next semantic graph slices.
+
+Find references currently returns same-document identifier occurrences for
+symbols declared in the current document. Cross-module references and precise
+shadowing-aware results will come from the shared semantic graph.
 
 ## Development
 

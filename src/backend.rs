@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
-use nomo::Diagnostic as NomoDiagnostic;
 use nomo::ast::{
     ConstDef, EnumDef, Function, ImplBlock, Param, SourceFile, Span, StructDef, TypeRef,
 };
+use nomo::{Diagnostic as NomoDiagnostic, TokenKind};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -80,6 +80,7 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -218,6 +219,29 @@ impl LanguageServer for Backend {
         ))
     }
 
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        Ok(references_for_text(
+            &path,
+            &text,
+            uri,
+            params.text_document_position.position,
+            params.context.include_declaration,
+        ))
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let path = uri
@@ -321,6 +345,43 @@ fn definition_for_text(
         uri,
         range: item.selection_range,
     }))
+}
+
+fn references_for_text(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
+    let symbol = identifier_at_position(text, position)?;
+    let symbols = hover_symbols(path, text).ok()?;
+    let item = symbols
+        .iter()
+        .filter(|item| item.name == symbol)
+        .min_by_key(|item| item.line)?;
+    let tokens = nomo::lex(path, text).ok()?;
+    let locations = tokens
+        .iter()
+        .filter_map(|token| {
+            let TokenKind::Ident(name) = &token.kind else {
+                return None;
+            };
+            if name != &item.name {
+                return None;
+            }
+            let range = token_range(token.line, token.column, name);
+            if !include_declaration && range == item.selection_range {
+                return None;
+            }
+            Some(Location {
+                uri: uri.clone(),
+                range,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Some(locations)
 }
 
 fn hover_symbols(path: &Path, text: &str) -> std::result::Result<Vec<HoverSymbol>, NomoDiagnostic> {
@@ -444,6 +505,22 @@ fn name_selection_range(span: &Span, name: &str) -> Range {
         .map(|byte_index| span.text[..byte_index].encode_utf16().count() as u32)
         .unwrap_or(fallback_start);
     let end = start + name.encode_utf16().count() as u32;
+    Range {
+        start: Position {
+            line,
+            character: start,
+        },
+        end: Position {
+            line,
+            character: end,
+        },
+    }
+}
+
+fn token_range(line: usize, column: usize, text: &str) -> Range {
+    let line = line.saturating_sub(1) as u32;
+    let start = column.saturating_sub(1) as u32;
+    let end = start + text.encode_utf16().count() as u32;
     Range {
         start: Position {
             line,
@@ -1130,6 +1207,134 @@ mod tests {
         );
 
         assert!(definition.is_none());
+    }
+
+    #[test]
+    fn references_return_current_document_identifier_locations() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let first: i64 = add(1, 2)\n    let second: i64 = add(first, 3)\n}\n";
+
+        let references = references_for_text(
+            &path,
+            text,
+            uri.clone(),
+            Position {
+                line: 7,
+                character: 23,
+            },
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(references.len(), 3);
+        assert!(references.iter().all(|location| location.uri == uri));
+        assert_eq!(
+            references
+                .iter()
+                .map(|location| location.range)
+                .collect::<Vec<_>>(),
+            vec![
+                Range {
+                    start: Position {
+                        line: 2,
+                        character: 3,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 6,
+                    },
+                },
+                Range {
+                    start: Position {
+                        line: 7,
+                        character: 21,
+                    },
+                    end: Position {
+                        line: 7,
+                        character: 24,
+                    },
+                },
+                Range {
+                    start: Position {
+                        line: 8,
+                        character: 22,
+                    },
+                    end: Position {
+                        line: 8,
+                        character: 25,
+                    },
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn references_can_exclude_declaration() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nstruct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+
+        let references = references_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 7,
+                character: 14,
+            },
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            references
+                .iter()
+                .map(|location| location.range)
+                .collect::<Vec<_>>(),
+            vec![
+                Range {
+                    start: Position {
+                        line: 7,
+                        character: 14,
+                    },
+                    end: Position {
+                        line: 7,
+                        character: 18,
+                    },
+                },
+                Range {
+                    start: Position {
+                        line: 7,
+                        character: 21,
+                    },
+                    end: Position {
+                        line: 7,
+                        character: 25,
+                    },
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn references_return_none_for_unknown_identifier() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+
+        let references = references_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 3,
+                character: 8,
+            },
+            true,
+        );
+
+        assert!(references.is_none());
     }
 
     #[test]

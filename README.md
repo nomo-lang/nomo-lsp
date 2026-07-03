@@ -21,6 +21,7 @@ exactly the ones the compiler produces.
 - Find references for current-document and local project module declarations
 - Rename for current-document and local project module identifier occurrences
 - Quick-fix code actions from compiler suggestions
+- Inlay hints for inferred `let` binding types
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -106,6 +107,12 @@ graph work.
 Code actions expose compiler suggestions as quick fixes. The first supported
 case is adding missing concrete imports such as `import std.io` or
 `import std.io.println`.
+
+Inlay hints show conservative inferred type hints for `let` bindings without an
+explicit type annotation, such as `let label = "hi"` rendering `: string`.
+Hints are only produced when the type can be determined from syntax-level facts
+such as literals, casts, struct literals, and matching `if`/`match` branch
+types. Parameter-name hints are not implemented yet.
 
 ## Development
 

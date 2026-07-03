@@ -13,7 +13,7 @@ exactly the ones the compiler produces.
 - Real-time diagnostics from the Nomo compiler front-end
 - Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
-- Keyword and semantic symbol completion
+- Keyword, import path and semantic symbol completion
 - Hover for current-document and local project module declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
 - Workspace symbols for project and workspace declarations
@@ -69,10 +69,12 @@ full-document edit against the editor's current open buffer. If the current text
 does not parse, the server returns no formatting edit and leaves diagnostics to
 the normal compiler diagnostic flow.
 
-Completion always includes v0.1 keywords. When the current document parses, it
-also includes top-level declarations and methods from the current document or,
-inside a project, local `src/**/*.nomo` modules. Open editor buffers are used as
-overlays so unsaved module declarations can appear in completion.
+Completion always includes v0.1 keywords. On `import` lines it adds supported
+`std.*` paths, local project modules, and dependency aliases/modules with source
+available. When the current document parses, completion also includes top-level
+declarations and methods from the current document or, inside a project, local
+`src/**/*.nomo` modules. Open editor buffers are used as overlays so unsaved
+module declarations can appear in completion.
 
 Hover indexes the open document plus local project `src/**/*.nomo` modules when
 a nearest `nomo.toml` is available, and shows the parsed signature plus any

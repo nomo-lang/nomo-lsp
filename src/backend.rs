@@ -1,5 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
@@ -18,6 +18,36 @@ const KEYWORDS: &[&str] = &[
     "package", "import", "pub", "fn", "struct", "enum", "impl", "let", "mut", "const", "if",
     "else", "match", "for", "in", "return", "defer", "break", "continue", "panic", "as", "true",
     "false", "void",
+];
+
+const STD_IMPORTS: &[&str] = &[
+    "std.array",
+    "std.array.Array",
+    "std.array.get",
+    "std.array.len",
+    "std.array.new",
+    "std.array.push",
+    "std.array.set",
+    "std.env",
+    "std.env.args",
+    "std.env.get",
+    "std.fs",
+    "std.fs.File",
+    "std.fs.FsError",
+    "std.fs.open",
+    "std.fs.read_to_string",
+    "std.fs.write_string",
+    "std.io",
+    "std.io.eprintln",
+    "std.io.println",
+    "std.option",
+    "std.option.Option",
+    "std.result",
+    "std.result.Result",
+    "std.result.map_err",
+    "std.string",
+    "std.string.concat",
+    "std.string.len",
 ];
 
 pub struct Backend {
@@ -182,6 +212,7 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(completion_for_document(
             &path,
             text.as_deref(),
+            Some(params.text_document_position.position),
             &source_overrides,
         ))))
     }
@@ -390,23 +421,25 @@ fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> 
 fn completion_for_document(
     path: &Path,
     text: Option<&str>,
+    position: Option<Position>,
     source_overrides: &[(PathBuf, String)],
 ) -> Vec<CompletionItem> {
     let mut seen = BTreeSet::new();
-    let mut items = KEYWORDS
-        .iter()
-        .filter_map(|kw| {
-            seen.insert((*kw).to_string()).then(|| CompletionItem {
-                label: kw.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut items = keyword_completion_items(&mut seen);
 
     let Some(text) = text else {
         return items;
     };
+    if position.is_some_and(|position| is_import_completion_position(text, position)) {
+        items.extend(import_completion_items(
+            path,
+            text,
+            source_overrides,
+            &mut seen,
+        ));
+        return items;
+    }
+
     let mut symbols = if let Ok(project) = nomo::project::discover_project(path) {
         let source_overrides = overrides_with_current(path, text, source_overrides);
         compiler_semantic::symbols_for_project_with_overrides(&project, &source_overrides)
@@ -427,6 +460,185 @@ fn completion_for_document(
         }
     }
     items
+}
+
+fn keyword_completion_items(seen: &mut BTreeSet<String>) -> Vec<CompletionItem> {
+    KEYWORDS
+        .iter()
+        .filter_map(|kw| {
+            seen.insert((*kw).to_string()).then(|| CompletionItem {
+                label: kw.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+fn is_import_completion_position(text: &str, position: Position) -> bool {
+    let Some(line) = text.lines().nth(position.line as usize) else {
+        return false;
+    };
+    let byte_index = utf16_character_to_byte_index(line, position.character);
+    line[..byte_index.min(line.len())]
+        .trim_start()
+        .starts_with("import")
+}
+
+fn import_completion_items(
+    path: &Path,
+    text: &str,
+    source_overrides: &[(PathBuf, String)],
+    seen: &mut BTreeSet<String>,
+) -> Vec<CompletionItem> {
+    let mut imports = STD_IMPORTS
+        .iter()
+        .map(|item| ((*item).to_string(), CompletionItemKind::MODULE))
+        .collect::<Vec<_>>();
+
+    if let Ok(project) = nomo::project::discover_project(path) {
+        if let Some(local_root) = local_import_root(text) {
+            imports.extend(module_imports_from_source_root(
+                &project.root.join("src"),
+                &local_root,
+                source_overrides,
+            ));
+        }
+        if let Ok(context) = nomo::project::project_module_context(&project) {
+            for alias in &context.external_import_roots {
+                imports.push((alias.clone(), CompletionItemKind::MODULE));
+            }
+            for module in &context.external_modules {
+                imports.extend(module_imports_from_source_root(
+                    &module.source_root,
+                    &module.import_root,
+                    source_overrides,
+                ));
+            }
+        }
+    }
+
+    imports.sort_by(|left, right| left.0.cmp(&right.0));
+    imports.dedup_by(|left, right| left.0 == right.0);
+    imports
+        .into_iter()
+        .filter_map(|(label, kind)| {
+            seen.insert(label.clone()).then(|| CompletionItem {
+                label,
+                kind: Some(kind),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+fn local_import_root(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let package = trimmed.strip_prefix("package ")?;
+        package
+            .split('.')
+            .next()
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| segment.to_string())
+    })
+}
+
+fn module_imports_from_source_root(
+    source_root: &Path,
+    import_root: &str,
+    source_overrides: &[(PathBuf, String)],
+) -> Vec<(String, CompletionItemKind)> {
+    let normalized_source_root = normalize_path(source_root);
+    let mut files = Vec::new();
+    collect_nomo_files(source_root, &mut files);
+    for (path, _) in source_overrides {
+        let normalized_path = normalize_path(path);
+        if normalized_path.starts_with(&normalized_source_root)
+            && path.extension().and_then(|ext| ext.to_str()) == Some("nomo")
+        {
+            files.push(normalized_path);
+        }
+    }
+    files.sort();
+    files.dedup();
+
+    files
+        .into_iter()
+        .filter_map(|path| {
+            module_import_from_file(&normalized_source_root, import_root, &normalize_path(&path))
+        })
+        .map(|import| (import, CompletionItemKind::MODULE))
+        .collect()
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        if let Ok(mut canonical_parent) = std::fs::canonicalize(parent) {
+            canonical_parent.push(file_name);
+            return canonical_parent;
+        }
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn collect_nomo_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_nomo_files(&path, files);
+        } else if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("nomo") {
+            files.push(path);
+        }
+    }
+}
+
+fn module_import_from_file(source_root: &Path, import_root: &str, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(source_root).ok()?;
+    if relative == Path::new("main.nomo") {
+        return Some(format!("{import_root}.main"));
+    }
+    let mut parts = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    let last = parts.last_mut()?;
+    if last == "main.nomo" {
+        parts.pop();
+    } else {
+        *last = last.strip_suffix(".nomo")?.to_string();
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("{import_root}.{}", parts.join(".")))
+}
+
+fn utf16_character_to_byte_index(line: &str, character: u32) -> usize {
+    let mut utf16_count = 0u32;
+    for (byte_index, ch) in line.char_indices() {
+        if utf16_count >= character {
+            return byte_index;
+        }
+        utf16_count += ch.len_utf16() as u32;
+    }
+    line.len()
 }
 
 fn completion_item_for_symbol(symbol: SemanticSymbol) -> CompletionItem {
@@ -1129,7 +1341,7 @@ mod tests {
         let path = PathBuf::from("main.nomo");
         let text = "package app.main\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nstruct User {\n    email: string\n}\n";
 
-        let items = completion_for_document(&path, Some(text), &[]);
+        let items = completion_for_document(&path, Some(text), None, &[]);
 
         assert!(
             items.iter().any(|item| {
@@ -1157,7 +1369,8 @@ mod tests {
     fn completion_keeps_keywords_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 
-        let items = completion_for_document(&path, Some("package app.main\n\nfn main( {\n"), &[]);
+        let items =
+            completion_for_document(&path, Some("package app.main\n\nfn main( {\n"), None, &[]);
 
         assert!(items.iter().any(|item| item.label == "fn"));
         assert!(!items.iter().any(|item| item.label == "main"));
@@ -1186,13 +1399,105 @@ mod tests {
         let overlay =
             "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
 
-        let items =
-            completion_for_document(&main, Some(main_source), &[(math, overlay.to_string())]);
+        let items = completion_for_document(
+            &main,
+            Some(main_source),
+            None,
+            &[(math, overlay.to_string())],
+        );
 
         assert!(items.iter().any(|item| {
             item.label == "add" && item.kind == Some(CompletionItemKind::FUNCTION)
         }));
         assert!(!items.iter().any(|item| item.label == "sub"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn import_completion_includes_std_and_local_modules() {
+        let root = temp_test_root("import-completion-local");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src/math")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let source = "package app.main\n\nimport \n\nfn main() -> void {\n}\n";
+        fs::write(&main, source).unwrap();
+        fs::write(project.join("src/math.nomo"), "package app.math\n").unwrap();
+        fs::write(
+            project.join("src/math/extra.nomo"),
+            "package app.math.extra\n",
+        )
+        .unwrap();
+        fs::write(project.join("src/math/main.nomo"), "package app.math\n").unwrap();
+
+        let items = completion_for_document(
+            &main,
+            Some(source),
+            Some(Position {
+                line: 2,
+                character: 7,
+            }),
+            &[],
+        );
+
+        assert!(items.iter().any(|item| item.label == "std.io"));
+        assert!(items.iter().any(|item| item.label == "std.io.println"));
+        assert!(items.iter().any(|item| item.label == "app.math"));
+        assert!(items.iter().any(|item| item.label == "app.math.extra"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn import_completion_includes_dependency_modules_and_overlays() {
+        let root = temp_test_root("import-completion-dependency");
+        reset_dir(&root);
+        let dependency = root.join("utils");
+        let project = root.join("hello");
+        fs::create_dir_all(dependency.join("src/path")).unwrap();
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
+        fs::write(
+            dependency.join("src/path.nomo"),
+            "package local_utils.path\n",
+        )
+        .unwrap();
+        let overlay_path = dependency.join("src/path/extra.nomo");
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"fynn/utils\", path = \"../utils\" }\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let source = "package app.main\n\nimport local_\n\nfn main() -> void {\n}\n";
+        fs::write(&main, source).unwrap();
+
+        let items = completion_for_document(
+            &main,
+            Some(source),
+            Some(Position {
+                line: 2,
+                character: 13,
+            }),
+            &[(overlay_path, "package local_utils.path.extra\n".to_string())],
+        );
+
+        assert!(items.iter().any(|item| item.label == "local_utils"));
+        assert!(items.iter().any(|item| item.label == "local_utils.path"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "local_utils.path.extra")
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

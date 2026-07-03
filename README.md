@@ -14,6 +14,7 @@ exactly the ones the compiler produces.
 - Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
 - Keyword completion
+- Hover for current-document declarations, including signatures and doc comments
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -56,6 +57,11 @@ Formatting uses the same AST-based formatter as `nomo fmt`, applied as a single
 full-document edit against the editor's current open buffer. If the current text
 does not parse, the server returns no formatting edit and leaves diagnostics to
 the normal compiler diagnostic flow.
+
+Hover currently indexes the open document's declarations and shows the parsed
+signature plus any `///` or `/** */` item doc comment. Cross-module hover and
+workspace-wide definition/reference queries are planned as the next semantic API
+slices.
 
 ## Development
 

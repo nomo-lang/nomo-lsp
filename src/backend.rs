@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
+use nomo::ast::{ConstDef, EnumDef, Function, ImplBlock, Param, SourceFile, StructDef, TypeRef};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -73,6 +75,7 @@ impl LanguageServer for Backend {
                     trigger_characters: None,
                     ..Default::default()
                 }),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -145,6 +148,27 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        Ok(hover_for_text(
+            &path,
+            &text,
+            params.text_document_position_params.position,
+        ))
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let path = uri
@@ -180,6 +204,328 @@ impl LanguageServer for Backend {
             data,
         })))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HoverSymbol {
+    name: String,
+    kind: &'static str,
+    signature: String,
+    docs: String,
+    line: usize,
+}
+
+fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> {
+    let symbol = identifier_at_position(text, position)?;
+    let symbols = hover_symbols(path, text).ok()?;
+    let item = symbols
+        .iter()
+        .filter(|item| item.name == symbol)
+        .min_by_key(|item| item.line)?;
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: hover_markdown(item),
+        }),
+        range: None,
+    })
+}
+
+fn hover_symbols(path: &Path, text: &str) -> std::result::Result<Vec<HoverSymbol>, NomoDiagnostic> {
+    let tokens = nomo::lex(path, text)?;
+    let ast = nomo::parser::parse(path, &tokens)?;
+    let docs = extract_doc_comments(text);
+    Ok(symbols_from_ast(&ast, &docs))
+}
+
+fn symbols_from_ast(ast: &SourceFile, docs: &DocComments) -> Vec<HoverSymbol> {
+    let mut symbols = Vec::new();
+    for item in &ast.structs {
+        symbols.push(HoverSymbol {
+            name: item.name.clone(),
+            kind: "struct",
+            signature: struct_signature(item),
+            docs: docs
+                .item_docs
+                .get(&item.span.line)
+                .cloned()
+                .unwrap_or_default(),
+            line: item.span.line,
+        });
+    }
+    for item in &ast.enums {
+        symbols.push(HoverSymbol {
+            name: item.name.clone(),
+            kind: "enum",
+            signature: enum_signature(item),
+            docs: docs
+                .item_docs
+                .get(&item.span.line)
+                .cloned()
+                .unwrap_or_default(),
+            line: item.span.line,
+        });
+    }
+    for item in &ast.consts {
+        symbols.push(HoverSymbol {
+            name: item.name.clone(),
+            kind: "const",
+            signature: const_signature(item),
+            docs: docs
+                .item_docs
+                .get(&item.span.line)
+                .cloned()
+                .unwrap_or_default(),
+            line: item.span.line,
+        });
+    }
+    for item in &ast.functions {
+        symbols.push(HoverSymbol {
+            name: item.name.clone(),
+            kind: "function",
+            signature: function_signature(item),
+            docs: docs
+                .item_docs
+                .get(&item.span.line)
+                .cloned()
+                .unwrap_or_default(),
+            line: item.span.line,
+        });
+    }
+    for impl_block in &ast.impls {
+        symbols.extend(method_symbols(impl_block, docs));
+    }
+    symbols
+}
+
+fn method_symbols(impl_block: &ImplBlock, docs: &DocComments) -> Vec<HoverSymbol> {
+    let receiver = type_ref(&impl_block.type_name);
+    impl_block
+        .methods
+        .iter()
+        .map(|method| HoverSymbol {
+            name: method.name.clone(),
+            kind: "method",
+            signature: method_signature(&receiver, method),
+            docs: docs
+                .item_docs
+                .get(&method.span.line)
+                .cloned()
+                .unwrap_or_default(),
+            line: method.span.line,
+        })
+        .collect()
+}
+
+fn hover_markdown(item: &HoverSymbol) -> String {
+    let mut value = format!("```nomo\n{}\n```", item.signature);
+    if !item.docs.is_empty() {
+        value.push_str("\n\n");
+        value.push_str(&item.docs);
+    }
+    value.push_str("\n\n");
+    value.push_str(item.kind);
+    value
+}
+
+fn identifier_at_position(text: &str, position: Position) -> Option<String> {
+    let line = text.lines().nth(position.line as usize)?;
+    let byte_index = utf16_character_to_byte_index(line, position.character);
+    let bytes = line.as_bytes();
+    if byte_index > bytes.len() {
+        return None;
+    }
+
+    let mut start = byte_index;
+    if start == bytes.len() && start > 0 {
+        start -= 1;
+    }
+    if !is_ident_byte(bytes.get(start).copied()?) && start > 0 {
+        start -= 1;
+    }
+    if !is_ident_byte(bytes.get(start).copied()?) {
+        return None;
+    }
+
+    let mut end = start;
+    while start > 0 && is_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    while end + 1 < bytes.len() && is_ident_byte(bytes[end + 1]) {
+        end += 1;
+    }
+    Some(line[start..=end].to_string())
+}
+
+fn utf16_character_to_byte_index(line: &str, character: u32) -> usize {
+    let mut utf16_count = 0u32;
+    for (byte_index, ch) in line.char_indices() {
+        if utf16_count >= character {
+            return byte_index;
+        }
+        utf16_count += ch.len_utf16() as u32;
+    }
+    line.len()
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn struct_signature(item: &StructDef) -> String {
+    format!(
+        "{}struct {}{}",
+        visibility_prefix(item.public),
+        item.name,
+        type_params(&item.type_params)
+    )
+}
+
+fn enum_signature(item: &EnumDef) -> String {
+    format!(
+        "{}enum {}{}",
+        visibility_prefix(item.public),
+        item.name,
+        type_params(&item.type_params)
+    )
+}
+
+fn const_signature(item: &ConstDef) -> String {
+    format!(
+        "{}const {}: {}",
+        visibility_prefix(item.public),
+        item.name,
+        type_ref(&item.type_ref)
+    )
+}
+
+fn function_signature(function: &Function) -> String {
+    let params = function
+        .params
+        .iter()
+        .map(param)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{}fn {}{}({}) -> {}",
+        visibility_prefix(function.public),
+        function.name,
+        type_params(&function.type_params),
+        params,
+        type_ref(&function.return_type)
+    )
+}
+
+fn method_signature(receiver: &str, function: &Function) -> String {
+    let params = function
+        .params
+        .iter()
+        .map(param)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{}fn {receiver}.{}{}({}) -> {}",
+        visibility_prefix(function.public),
+        function.name,
+        type_params(&function.type_params),
+        params,
+        type_ref(&function.return_type)
+    )
+}
+
+fn param(param: &Param) -> String {
+    let mutable = if param.mutable { "mut " } else { "" };
+    format!("{mutable}{}: {}", param.name, type_ref(&param.type_ref))
+}
+
+fn type_params(params: &[String]) -> String {
+    if params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", params.join(", "))
+    }
+}
+
+fn type_ref(type_ref_value: &TypeRef) -> String {
+    let base = type_ref_value.path.join(".");
+    if type_ref_value.args.is_empty() {
+        base
+    } else {
+        format!(
+            "{base}<{}>",
+            type_ref_value
+                .args
+                .iter()
+                .map(type_ref)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn visibility_prefix(public: bool) -> &'static str {
+    if public { "pub " } else { "" }
+}
+
+#[derive(Debug, Default)]
+struct DocComments {
+    item_docs: BTreeMap<usize, String>,
+}
+
+fn extract_doc_comments(source: &str) -> DocComments {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut comments = DocComments::default();
+    let mut pending = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim_start();
+        if let Some(text) = trimmed.strip_prefix("///") {
+            pending.push(text.trim_start().to_string());
+            index += 1;
+            continue;
+        }
+        if trimmed.starts_with("/**") {
+            let (doc, next_index) = collect_block_doc(&lines, index);
+            pending.push(doc);
+            index = next_index;
+            continue;
+        }
+        if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*") {
+            if !pending.is_empty() {
+                comments.item_docs.insert(index + 1, pending.join("\n"));
+                pending.clear();
+            }
+        }
+        index += 1;
+    }
+    comments
+}
+
+fn collect_block_doc(lines: &[&str], start: usize) -> (String, usize) {
+    let mut raw = String::new();
+    let mut index = start;
+    while index < lines.len() {
+        if !raw.is_empty() {
+            raw.push('\n');
+        }
+        raw.push_str(lines[index]);
+        if lines[index].contains("*/") {
+            index += 1;
+            break;
+        }
+        index += 1;
+    }
+    let raw = raw.trim().trim_start_matches("/**").trim_end_matches("*/");
+    let doc = raw
+        .lines()
+        .map(|line| line.trim().trim_start_matches('*').trim_start())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    (doc, index)
 }
 
 fn formatting_edits_for_text(path: &Path, text: &str) -> Option<Vec<TextEdit>> {
@@ -419,6 +765,96 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("json.parser"));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn hover_returns_function_signature_and_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 8,
+                character: 22,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("pub fn add(a: i64, b: i64) -> i64"));
+        assert!(markup.value.contains("Adds two numbers."));
+        assert!(markup.value.contains("function"));
+    }
+
+    #[test]
+    fn hover_returns_struct_signature_and_block_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/** User record.\n * Stores identity fields.\n */\npub struct User {\n    pub id: string\n}\n\nfn main() -> void {\n    let user: User = User { id: \"1\" }\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 10,
+                character: 14,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("pub struct User"));
+        assert!(markup.value.contains("User record."));
+        assert!(markup.value.contains("Stores identity fields."));
+    }
+
+    #[test]
+    fn hover_returns_method_signature_and_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nstruct User {\n    email: string\n}\n\nimpl User {\n    /// Reads the stored email.\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n    let email: string = user.email()\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 15,
+                character: 30,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(
+            markup
+                .value
+                .contains("pub fn User.email(self: User) -> string")
+        );
+        assert!(markup.value.contains("Reads the stored email."));
+        assert!(markup.value.contains("method"));
+    }
+
+    #[test]
+    fn hover_returns_none_for_unknown_identifier() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 3,
+                character: 8,
+            },
+        );
+
+        assert!(hover.is_none());
     }
 
     #[test]

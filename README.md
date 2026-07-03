@@ -33,6 +33,10 @@ language:
 `nomo-lsp` depends on [`nomo`](https://github.com/nomo-lang/nomo); those editor
 clients depend on `nomo-lsp`.
 
+Hover, document symbols, go-to-definition, and references are backed by the
+compiler crate's reusable `semantic` API. The LSP server only adapts compiler
+symbol ranges and signatures into LSP types.
+
 ## Requirements
 
 - A recent stable Rust toolchain (the crate uses edition 2024).

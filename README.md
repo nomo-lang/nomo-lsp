@@ -63,7 +63,9 @@ Diagnostics use the same compiler API as project-level `nomo check`: for a file
 inside a project, `nomo-lsp` walks up to the nearest `nomo.toml`, reads declared
 dependency aliases, and accepts imports such as `import json.parser` only when
 `json` is declared in the manifest. Standalone files without a manifest keep the
-single-file `nomoc` behavior and only accept built-in `std.*` imports.
+single-file `nomoc` behavior and only accept built-in `std.*` imports. LSP
+diagnostics include `codeDescription` links to the matching
+`docs/diagnostics/E####.md` reference page.
 
 Formatting uses the same AST-based formatter as `nomo fmt`, applied as a single
 full-document edit against the editor's current open buffer. If the current text

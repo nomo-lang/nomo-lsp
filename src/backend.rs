@@ -51,6 +51,9 @@ const STD_IMPORTS: &[&str] = &[
     "std.string.len",
 ];
 
+const DIAGNOSTIC_DOCS_BASE_URL: &str =
+    "https://github.com/nomo-lang/nomo/blob/main/docs/diagnostics";
+
 pub struct Backend {
     client: Client,
     /// In-memory contents of every open document, keyed by its URI.
@@ -1422,13 +1425,19 @@ fn to_lsp_diagnostic(diag: &NomoDiagnostic) -> tower_lsp::lsp_types::Diagnostic 
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(diag.code.to_string())),
-        code_description: None,
+        code_description: diagnostic_code_description(diag.code),
         source: Some("nomo".to_string()),
         message: diag.message.clone(),
         related_information: None,
         tags: None,
         data: None,
     }
+}
+
+fn diagnostic_code_description(code: &str) -> Option<CodeDescription> {
+    Url::parse(&format!("{DIAGNOSTIC_DOCS_BASE_URL}/{code}.md"))
+        .ok()
+        .map(|href| CodeDescription { href })
 }
 
 #[cfg(test)]
@@ -1571,6 +1580,21 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("json.parser"));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_include_code_description_links() {
+        let path = PathBuf::from("main.nomo");
+        let diagnostics = diagnostics_for_text(&path, "package app.main\n@\n", &[]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0]
+                .code_description
+                .as_ref()
+                .map(|description| description.href.as_str()),
+            Some("https://github.com/nomo-lang/nomo/blob/main/docs/diagnostics/E0102.md")
+        );
     }
 
     #[test]

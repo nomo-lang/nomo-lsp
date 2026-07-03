@@ -15,6 +15,7 @@ exactly the ones the compiler produces.
 - Full-document text synchronization (open / change / save / close)
 - Keyword completion
 - Semantic highlighting tokens
+- Full-document formatting through the shared `nomo fmt` formatter
 
 ## Role in the Nomo ecosystem
 
@@ -50,6 +51,11 @@ inside a project, `nomo-lsp` walks up to the nearest `nomo.toml`, reads declared
 dependency aliases, and accepts imports such as `import json.parser` only when
 `json` is declared in the manifest. Standalone files without a manifest keep the
 single-file `nomoc` behavior and only accept built-in `std.*` imports.
+
+Formatting uses the same AST-based formatter as `nomo fmt`, applied as a single
+full-document edit against the editor's current open buffer. If the current text
+does not parse, the server returns no formatting edit and leaves diagnostics to
+the normal compiler diagnostic flow.
 
 ## Development
 

@@ -73,6 +73,7 @@ impl LanguageServer for Backend {
                     trigger_characters: None,
                     ..Default::default()
                 }),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -144,6 +145,23 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        Ok(formatting_edits_for_text(&path, &text))
+    }
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -161,6 +179,40 @@ impl LanguageServer for Backend {
             result_id: None,
             data,
         })))
+    }
+}
+
+fn formatting_edits_for_text(path: &Path, text: &str) -> Option<Vec<TextEdit>> {
+    let formatted = nomo::format_source(path, text).ok()?;
+    if formatted == text {
+        return Some(Vec::new());
+    }
+
+    Some(vec![TextEdit {
+        range: full_document_range(text),
+        new_text: formatted,
+    }])
+}
+
+fn full_document_range(text: &str) -> Range {
+    let mut line = 0;
+    let mut character = 0;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += ch.len_utf16() as u32;
+        }
+    }
+
+    Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position { line, character },
     }
 }
 
@@ -367,6 +419,70 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("json.parser"));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn formatting_formats_standalone_source_text() {
+        let path = PathBuf::from("main.nomo");
+        let edits = formatting_edits_for_text(
+            &path,
+            "package app . main\nfn main(){\nlet message:string=\"hi\"\n}\n",
+        )
+        .unwrap();
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            edits[0].range,
+            Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 4,
+                    character: 0,
+                },
+            }
+        );
+        assert_eq!(
+            edits[0].new_text,
+            "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n"
+        );
+    }
+
+    #[test]
+    fn formatting_returns_empty_edits_for_already_formatted_text() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+
+        let edits = formatting_edits_for_text(&path, text).unwrap();
+
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn formatting_returns_none_for_invalid_source() {
+        let path = PathBuf::from("main.nomo");
+
+        let edits = formatting_edits_for_text(&path, "package app.main\n\nfn main( {\n");
+
+        assert!(edits.is_none());
+    }
+
+    #[test]
+    fn formatting_formats_script_body_source_text() {
+        let path = PathBuf::from("script.nomo");
+        let edits = formatting_edits_for_text(
+            &path,
+            "package app.main\nimport std.io\nlet message:string=\"hi\"\nio.println(message)\n",
+        )
+        .unwrap();
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            edits[0].new_text,
+            "package app.main\n\nimport std.io\n\nlet message: string = \"hi\"\nio.println(message)\n"
+        );
     }
 
     fn reset_dir(path: &Path) {

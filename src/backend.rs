@@ -39,23 +39,26 @@ impl Backend {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.path()));
-        let module_source_overrides = self
-            .documents
-            .iter()
-            .filter_map(|entry| {
-                let uri = entry.key();
-                let path = uri
-                    .to_file_path()
-                    .unwrap_or_else(|_| PathBuf::from(uri.path()));
-                Some((path, entry.value().clone()))
-            })
-            .collect::<Vec<_>>();
+        let module_source_overrides = self.document_overrides();
 
         let diagnostics = diagnostics_for_text(&path, text, &module_source_overrides);
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
+    }
+
+    fn document_overrides(&self) -> Vec<(PathBuf, String)> {
+        self.documents
+            .iter()
+            .map(|entry| {
+                let uri = entry.key();
+                let path = uri
+                    .to_file_path()
+                    .unwrap_or_else(|_| PathBuf::from(uri.path()));
+                (path, entry.value().clone())
+            })
+            .collect()
     }
 }
 
@@ -165,10 +168,12 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(hover_for_text(
+        let source_overrides = self.document_overrides();
+        Ok(hover_for_document(
             &path,
             &text,
             params.text_document_position_params.position,
+            &source_overrides,
         ))
     }
 
@@ -209,11 +214,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(definition_for_text(
+        let source_overrides = self.document_overrides();
+        Ok(definition_for_document(
             &path,
             &text,
             uri,
             params.text_document_position_params.position,
+            &source_overrides,
         ))
     }
 
@@ -231,12 +238,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(references_for_text(
+        let source_overrides = self.document_overrides();
+        Ok(references_for_document(
             &path,
             &text,
             uri,
             params.text_document_position.position,
             params.context.include_declaration,
+            &source_overrides,
         ))
     }
 
@@ -281,10 +290,37 @@ fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> 
     let item = compiler_semantic::symbol_at_position(path, text, to_compiler_position(position))
         .ok()??;
 
+    hover_for_symbol(&item)
+}
+
+fn hover_for_document(
+    path: &Path,
+    text: &str,
+    position: Position,
+    source_overrides: &[(PathBuf, String)],
+) -> Option<Hover> {
+    let compiler_position = to_compiler_position(position);
+    let item = if let Ok(project) = nomo::project::discover_project(path) {
+        compiler_semantic::symbol_at_project_position(
+            &project,
+            path,
+            text,
+            compiler_position,
+            source_overrides,
+        )
+        .ok()?
+    } else {
+        compiler_semantic::symbol_at_position(path, text, compiler_position).ok()?
+    }?;
+
+    hover_for_symbol(&item)
+}
+
+fn hover_for_symbol(item: &SemanticSymbol) -> Option<Hover> {
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: hover_markdown(&item),
+            value: hover_markdown(item),
         }),
         range: None,
     })
@@ -325,6 +361,28 @@ fn definition_for_text(
     }))
 }
 
+fn definition_for_document(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+    source_overrides: &[(PathBuf, String)],
+) -> Option<GotoDefinitionResponse> {
+    let compiler_position = to_compiler_position(position);
+    if let Ok(project) = nomo::project::discover_project(path) {
+        let location = compiler_semantic::definition_for_project_text(
+            &project,
+            path,
+            text,
+            compiler_position,
+            source_overrides,
+        )
+        .ok()??;
+        return Some(GotoDefinitionResponse::Scalar(to_lsp_location(location)?));
+    }
+    definition_for_text(path, text, uri, position)
+}
+
 fn references_for_text(
     path: &Path,
     text: &str,
@@ -348,6 +406,37 @@ fn references_for_text(
             })
             .collect::<Vec<_>>(),
     )
+}
+
+fn references_for_document(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+    include_declaration: bool,
+    source_overrides: &[(PathBuf, String)],
+) -> Option<Vec<Location>> {
+    let compiler_position = to_compiler_position(position);
+    if let Ok(project) = nomo::project::discover_project(path) {
+        let locations = compiler_semantic::references_for_project_text(
+            &project,
+            path,
+            text,
+            compiler_position,
+            include_declaration,
+            source_overrides,
+        )
+        .ok()??;
+        return locations.into_iter().map(to_lsp_location).collect();
+    }
+    references_for_text(path, text, uri, position, include_declaration)
+}
+
+fn to_lsp_location(location: compiler_semantic::SemanticLocation) -> Option<Location> {
+    Some(Location {
+        uri: Url::from_file_path(location.path).ok()?,
+        range: to_lsp_range(location.range),
+    })
 }
 
 fn hover_markdown(item: &SemanticSymbol) -> String {
@@ -994,6 +1083,154 @@ mod tests {
         );
 
         assert!(references.is_none());
+    }
+
+    #[test]
+    fn definition_returns_cross_file_project_location() {
+        let root = temp_test_root("semantic-definition-project");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let definition = definition_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(location.uri, Url::from_file_path(&math).unwrap());
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 3,
+                    character: 7,
+                },
+                end: Position {
+                    line: 3,
+                    character: 10,
+                },
+            }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn hover_uses_cross_file_project_symbol_docs() {
+        let root = temp_test_root("semantic-hover-project");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let hover = hover_for_document(
+            &main,
+            main_source,
+            Position {
+                line: 5,
+                character: 23,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("pub fn add(a: i64, b: i64) -> i64"));
+        assert!(markup.value.contains("Adds numbers."));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn references_return_cross_file_project_locations_with_overlays() {
+        let root = temp_test_root("semantic-references-project-overlay");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
+        )
+        .unwrap();
+        let overlay =
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+
+        let references = references_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            true,
+            &[(math.clone(), overlay.to_string())],
+        )
+        .unwrap();
+
+        assert!(references.iter().any(|location| {
+            location.uri == Url::from_file_path(&main).unwrap()
+                && location.range.start
+                    == Position {
+                        line: 5,
+                        character: 21,
+                    }
+        }));
+        assert!(references.iter().any(|location| {
+            location.uri == Url::from_file_path(&math).unwrap()
+                && location.range.start
+                    == Position {
+                        line: 2,
+                        character: 7,
+                    }
+        }));
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

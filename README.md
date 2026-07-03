@@ -14,10 +14,10 @@ exactly the ones the compiler produces.
 - Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
 - Keyword completion
-- Hover for current-document declarations, including signatures and doc comments
+- Hover for current-document and local project module declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
-- Go-to-definition for current-document declarations
-- Find references for current-document declarations
+- Go-to-definition for current-document and local project module declarations
+- Find references for current-document and local project module declarations
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -65,21 +65,22 @@ full-document edit against the editor's current open buffer. If the current text
 does not parse, the server returns no formatting edit and leaves diagnostics to
 the normal compiler diagnostic flow.
 
-Hover currently indexes the open document's declarations and shows the parsed
-signature plus any `///` or `/** */` item doc comment. Cross-module hover and
-workspace-wide definition/reference queries are planned as the next semantic API
-slices.
+Hover indexes the open document plus local project `src/**/*.nomo` modules when
+a nearest `nomo.toml` is available, and shows the parsed signature plus any
+`///` or `/** */` item doc comment. Open editor buffers are used as overlays so
+unsaved module edits can participate in hover results.
 
 Document symbols use the same parsed declaration index to power editor outline
 views for top-level structs, enums, constants, functions, and methods.
 
-Go-to-definition currently resolves references to declarations in the same open
-document. Cross-module and workspace-wide definition lookup are planned as the
-next semantic graph slices.
+Go-to-definition resolves references to declarations in the same document or in
+local project modules under `src/**/*.nomo`. Dependency package and whole
+workspace definition lookup remain future semantic graph slices.
 
-Find references currently returns same-document identifier occurrences for
-symbols declared in the current document. Cross-module references and precise
-shadowing-aware results will come from the shared semantic graph.
+Find references returns lexical identifier occurrences in the same document and
+local project modules for the selected declaration name. Precise shadowing-aware,
+dependency-aware, and workspace-wide references will come from the shared
+semantic graph.
 
 ## Development
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
@@ -82,6 +83,7 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -245,6 +247,31 @@ impl LanguageServer for Backend {
             uri,
             params.text_document_position.position,
             params.context.include_declaration,
+            &source_overrides,
+        ))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        let source_overrides = self.document_overrides();
+        Ok(rename_for_document(
+            &path,
+            &text,
+            uri,
+            params.text_document_position.position,
+            &params.new_name,
             &source_overrides,
         ))
     }
@@ -430,6 +457,55 @@ fn references_for_document(
         return locations.into_iter().map(to_lsp_location).collect();
     }
     references_for_text(path, text, uri, position, include_declaration)
+}
+
+fn rename_for_document(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+    new_name: &str,
+    source_overrides: &[(PathBuf, String)],
+) -> Option<WorkspaceEdit> {
+    if !is_nomo_identifier(new_name) {
+        return None;
+    }
+    let locations = references_for_document(path, text, uri, position, true, source_overrides)?;
+    if locations.is_empty() {
+        return None;
+    }
+
+    let mut changes = HashMap::<Url, Vec<TextEdit>>::new();
+    for location in locations {
+        let edits = changes.entry(location.uri).or_default();
+        if edits.iter().any(|edit| edit.range == location.range) {
+            continue;
+        }
+        edits.push(TextEdit {
+            range: location.range,
+            new_text: new_name.to_string(),
+        });
+    }
+
+    Some(WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    })
+}
+
+fn is_nomo_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
+        return false;
+    }
+    !KEYWORDS.contains(&name)
 }
 
 fn to_lsp_location(location: compiler_semantic::SemanticLocation) -> Option<Location> {
@@ -1086,6 +1162,68 @@ mod tests {
     }
 
     #[test]
+    fn rename_returns_current_document_workspace_edit() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+
+        let edit = rename_for_document(
+            &path,
+            text,
+            uri.clone(),
+            Position {
+                line: 7,
+                character: 22,
+            },
+            "sum",
+            &[],
+        )
+        .unwrap();
+
+        let changes = edit.changes.unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert!(edits.iter().all(|edit| edit.new_text == "sum"));
+        assert_eq!(
+            edits
+                .iter()
+                .map(|edit| edit.range.start)
+                .collect::<Vec<_>>(),
+            vec![
+                Position {
+                    line: 2,
+                    character: 3,
+                },
+                Position {
+                    line: 7,
+                    character: 21,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_rejects_invalid_identifier() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+
+        let edit = rename_for_document(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 2,
+                character: 4,
+            },
+            "for",
+            &[],
+        );
+
+        assert!(edit.is_none());
+    }
+
+    #[test]
     fn definition_returns_cross_file_project_location() {
         let root = temp_test_root("semantic-definition-project");
         reset_dir(&root);
@@ -1230,6 +1368,66 @@ mod tests {
                         character: 7,
                     }
         }));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn rename_returns_cross_file_project_workspace_edit() {
+        let root = temp_test_root("semantic-rename-project");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        let main_uri = Url::from_file_path(&main).unwrap();
+        let math_uri = Url::from_file_path(&math).unwrap();
+
+        let edit = rename_for_document(
+            &main,
+            main_source,
+            main_uri.clone(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            "sum",
+            &[],
+        )
+        .unwrap();
+
+        let changes = edit.changes.unwrap();
+        let main_edits = changes.get(&main_uri).unwrap();
+        let math_edits = changes.get(&math_uri).unwrap();
+        assert_eq!(main_edits.len(), 1);
+        assert_eq!(math_edits.len(), 1);
+        assert_eq!(main_edits[0].new_text, "sum");
+        assert_eq!(math_edits[0].new_text, "sum");
+        assert_eq!(
+            main_edits[0].range.start,
+            Position {
+                line: 5,
+                character: 21,
+            }
+        );
+        assert_eq!(
+            math_edits[0].range.start,
+            Position {
+                line: 2,
+                character: 7,
+            }
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

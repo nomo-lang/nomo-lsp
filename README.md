@@ -18,6 +18,7 @@ exactly the ones the compiler produces.
 - Document symbols for current-document declarations and methods
 - Go-to-definition for current-document and local project module declarations
 - Find references for current-document and local project module declarations
+- Rename for current-document and local project module identifier occurrences
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -81,6 +82,11 @@ Find references returns lexical identifier occurrences in the same document and
 local project modules for the selected declaration name. Precise shadowing-aware,
 dependency-aware, and workspace-wide references will come from the shared
 semantic graph.
+
+Rename reuses the same reference locations to return a workspace edit across the
+current document and local project modules. The new name must be a valid Nomo
+identifier; dependency-aware and shadowing-aware rename remain future semantic
+graph work.
 
 ## Development
 

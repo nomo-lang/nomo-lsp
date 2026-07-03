@@ -107,6 +107,7 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -315,6 +316,30 @@ impl LanguageServer for Backend {
             params.text_document_position.position,
             &params.new_name,
             &source_overrides,
+        ))
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        let source_overrides = self.document_overrides();
+        Ok(code_actions_for_text(
+            &path,
+            &text,
+            uri,
+            &source_overrides,
+            &params.context.diagnostics,
         ))
     }
 
@@ -798,6 +823,72 @@ fn formatting_edits_for_text(path: &Path, text: &str) -> Option<Vec<TextEdit>> {
     }])
 }
 
+fn code_actions_for_text(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    module_source_overrides: &[(PathBuf, String)],
+    diagnostics: &[tower_lsp::lsp_types::Diagnostic],
+) -> Option<CodeActionResponse> {
+    let diagnostic = compiler_diagnostic_for_text(path, text, module_source_overrides).err()?;
+    if diagnostic.suggestions.is_empty() {
+        return Some(Vec::new());
+    }
+    let lsp_diagnostic = diagnostics
+        .iter()
+        .find(|item| {
+            item.code.as_ref().is_some_and(
+                |code| matches!(code, NumberOrString::String(value) if value == diagnostic.code),
+            )
+        })
+        .cloned()
+        .unwrap_or_else(|| to_lsp_diagnostic(&diagnostic));
+
+    let actions = diagnostic
+        .suggestions
+        .iter()
+        .map(|suggestion| {
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title: suggestion.description.clone(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![lsp_diagnostic.clone()]),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(HashMap::from([(
+                        uri.clone(),
+                        vec![TextEdit {
+                            range: suggestion_range(suggestion),
+                            new_text: suggestion.text.clone(),
+                        }],
+                    )])),
+                    document_changes: None,
+                    change_annotations: None,
+                }),
+                command: None,
+                is_preferred: Some(true),
+                disabled: None,
+                data: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(actions)
+}
+
+fn suggestion_range(suggestion: &nomo::Suggestion) -> Range {
+    let line = suggestion.line.saturating_sub(1) as u32;
+    let start_char = suggestion.column.saturating_sub(1) as u32;
+    let end_char = start_char + suggestion.length as u32;
+    Range {
+        start: Position {
+            line,
+            character: start_char,
+        },
+        end: Position {
+            line,
+            character: end_char,
+        },
+    }
+}
+
 fn full_document_range(text: &str) -> Range {
     let mut line = 0;
     let mut character = 0;
@@ -825,7 +916,18 @@ fn diagnostics_for_text(
     text: &str,
     module_source_overrides: &[(PathBuf, String)],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let result = if let Ok(project) = nomo::project::discover_project(path) {
+    match compiler_diagnostic_for_text(path, text, module_source_overrides) {
+        Ok(_) => Vec::new(),
+        Err(diag) => vec![to_lsp_diagnostic(&diag)],
+    }
+}
+
+fn compiler_diagnostic_for_text(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+) -> std::result::Result<(), NomoDiagnostic> {
+    if let Ok(project) = nomo::project::discover_project(path) {
         match nomo::project::project_module_context(&project) {
             Ok(context) => nomo::check_source_text_with_project_modules_and_overrides(
                 path,
@@ -834,7 +936,8 @@ fn diagnostics_for_text(
                 &context.external_import_roots,
                 &context.external_modules,
                 module_source_overrides,
-            ),
+            )
+            .map(|_| ()),
             Err(message) => Err(NomoDiagnostic::new(
                 "E0901",
                 message,
@@ -846,11 +949,7 @@ fn diagnostics_for_text(
             )),
         }
     } else {
-        nomo::check_source_text(path, text)
-    };
-    match result {
-        Ok(_) => Vec::new(),
-        Err(diag) => vec![to_lsp_diagnostic(&diag)],
+        nomo::check_source_text(path, text).map(|_| ())
     }
 }
 
@@ -1213,6 +1312,54 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "fresh_name");
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn code_actions_return_quick_fix_for_compiler_suggestion() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    io.println(\"Hello\")\n}\n";
+        let diagnostics = diagnostics_for_text(&path, text, &[]);
+
+        let actions = code_actions_for_text(&path, text, uri.clone(), &[], &diagnostics).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(action.title, "add `import std.io` to use `io.println`");
+        assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+        assert_eq!(action.diagnostics.as_ref().unwrap().len(), 1);
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(
+            edits,
+            &vec![TextEdit {
+                range: Range {
+                    start: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                },
+                new_text: "import std.io\n".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn code_actions_return_empty_for_diagnostic_without_suggestions() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    let value: i32 = \"bad\"\n}\n";
+        let diagnostics = diagnostics_for_text(&path, text, &[]);
+
+        let actions = code_actions_for_text(&path, text, uri, &[], &diagnostics).unwrap();
+
+        assert!(actions.is_empty());
     }
 
     #[test]

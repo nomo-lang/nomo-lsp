@@ -20,6 +20,7 @@ exactly the ones the compiler produces.
 - Go-to-definition for current-document and local project module declarations
 - Find references for current-document and local project module declarations
 - Rename for current-document and local project module identifier occurrences
+- Quick-fix code actions from compiler suggestions
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -37,8 +38,8 @@ clients depend on `nomo-lsp`.
 
 Completion, hover, document symbols, workspace symbols, go-to-definition,
 references, and rename are backed by the compiler crate's reusable `semantic`
-API. The LSP server only adapts compiler symbol ranges and signatures into LSP
-types.
+API. Code actions are backed by compiler diagnostics and suggestions. The LSP
+server only adapts compiler ranges, signatures and suggestions into LSP types.
 
 ## Requirements
 
@@ -99,6 +100,10 @@ Rename reuses the same reference locations to return a workspace edit across the
 current document and local project modules. The new name must be a valid Nomo
 identifier; dependency-aware and shadowing-aware rename remain future semantic
 graph work.
+
+Code actions expose compiler suggestions as quick fixes. The first supported
+case is adding missing concrete imports such as `import std.io` or
+`import std.io.println`.
 
 ## Development
 

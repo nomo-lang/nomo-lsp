@@ -51,9 +51,6 @@ const STD_IMPORTS: &[&str] = &[
     "std.string.len",
 ];
 
-const DIAGNOSTIC_DOCS_BASE_URL: &str =
-    "https://github.com/nomo-lang/nomo/blob/main/docs/diagnostics";
-
 pub struct Backend {
     client: Client,
     /// In-memory contents of every open document, keyed by its URI.
@@ -1435,7 +1432,7 @@ fn to_lsp_diagnostic(diag: &NomoDiagnostic) -> tower_lsp::lsp_types::Diagnostic 
 }
 
 fn diagnostic_code_description(code: &str) -> Option<CodeDescription> {
-    Url::parse(&format!("{DIAGNOSTIC_DOCS_BASE_URL}/{code}.md"))
+    Url::parse(&nomo::diagnostic::diagnostic_documentation_url(code)?)
         .ok()
         .map(|href| CodeDescription { href })
 }
@@ -1595,6 +1592,11 @@ mod tests {
                 .map(|description| description.href.as_str()),
             Some("https://github.com/nomo-lang/nomo/blob/main/docs/diagnostics/E0102.md")
         );
+    }
+
+    #[test]
+    fn undocumented_diagnostics_do_not_include_code_description_links() {
+        assert!(diagnostic_code_description("E9999").is_none());
     }
 
     #[test]

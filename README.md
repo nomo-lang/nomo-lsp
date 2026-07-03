@@ -16,6 +16,7 @@ exactly the ones the compiler produces.
 - Keyword and semantic symbol completion
 - Hover for current-document and local project module declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
+- Workspace symbols for project and workspace declarations
 - Go-to-definition for current-document and local project module declarations
 - Find references for current-document and local project module declarations
 - Rename for current-document and local project module identifier occurrences
@@ -34,9 +35,10 @@ language:
 `nomo-lsp` depends on [`nomo`](https://github.com/nomo-lang/nomo); those editor
 clients depend on `nomo-lsp`.
 
-Completion, hover, document symbols, go-to-definition, references, and rename
-are backed by the compiler crate's reusable `semantic` API. The LSP server only
-adapts compiler symbol ranges and signatures into LSP types.
+Completion, hover, document symbols, workspace symbols, go-to-definition,
+references, and rename are backed by the compiler crate's reusable `semantic`
+API. The LSP server only adapts compiler symbol ranges and signatures into LSP
+types.
 
 ## Requirements
 
@@ -78,6 +80,11 @@ unsaved module edits can participate in hover results.
 
 Document symbols use the same parsed declaration index to power editor outline
 views for top-level structs, enums, constants, functions, and methods.
+
+Workspace symbols index configured LSP workspace roots. A root that contains a
+Nomo workspace indexes every workspace member; otherwise the nearest project is
+indexed. Results include current open-buffer overlays and are filtered by the
+client query.
 
 Go-to-definition resolves references to declarations in the same document or in
 local project modules under `src/**/*.nomo`. Dependency package and whole

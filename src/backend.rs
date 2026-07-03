@@ -24,6 +24,8 @@ pub struct Backend {
     client: Client,
     /// In-memory contents of every open document, keyed by its URI.
     documents: DashMap<Url, String>,
+    /// Workspace roots supplied by the client during initialization.
+    workspace_roots: DashMap<String, PathBuf>,
 }
 
 impl Backend {
@@ -31,6 +33,7 @@ impl Backend {
         Self {
             client,
             documents: DashMap::new(),
+            workspace_roots: DashMap::new(),
         }
     }
 
@@ -61,11 +64,30 @@ impl Backend {
             })
             .collect()
     }
+
+    fn configured_workspace_roots(&self) -> Vec<PathBuf> {
+        self.workspace_roots
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
+    }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        if let Some(workspace_folders) = params.workspace_folders {
+            for folder in workspace_folders {
+                if let Ok(path) = folder.uri.to_file_path() {
+                    self.workspace_roots.insert(folder.uri.to_string(), path);
+                }
+            }
+        } else if let Some(root_uri) = params.root_uri {
+            if let Ok(path) = root_uri.to_file_path() {
+                self.workspace_roots.insert(root_uri.to_string(), path);
+            }
+        }
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "nomo-lsp".to_string(),
@@ -81,6 +103,7 @@ impl LanguageServer for Backend {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
@@ -160,6 +183,19 @@ impl LanguageServer for Backend {
             text.as_deref(),
             &source_overrides,
         ))))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let roots = self.configured_workspace_roots();
+        let source_overrides = self.document_overrides();
+        Ok(Some(workspace_symbols_for_roots(
+            &roots,
+            &params.query,
+            &source_overrides,
+        )))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -381,6 +417,99 @@ fn completion_item_for_symbol(symbol: SemanticSymbol) -> CompletionItem {
         }),
         ..Default::default()
     }
+}
+
+fn workspace_symbols_for_roots(
+    roots: &[PathBuf],
+    query: &str,
+    source_overrides: &[(PathBuf, String)],
+) -> Vec<SymbolInformation> {
+    let query = query.to_ascii_lowercase();
+    let mut seen_projects = BTreeSet::new();
+    let mut seen_symbols = BTreeSet::new();
+    let mut items = Vec::new();
+
+    for project in projects_for_roots(roots) {
+        if !seen_projects.insert(project.root.clone()) {
+            continue;
+        }
+        let Ok(symbols) =
+            compiler_semantic::symbols_for_project_with_overrides(&project, source_overrides)
+        else {
+            continue;
+        };
+        for symbol in symbols {
+            if !query.is_empty() && !symbol.name.to_ascii_lowercase().contains(&query) {
+                continue;
+            }
+            let key = (
+                symbol.source_path.clone(),
+                symbol.name.clone(),
+                symbol.selection_range.start.line,
+                symbol.selection_range.start.character,
+            );
+            if !seen_symbols.insert(key) {
+                continue;
+            }
+            if let Some(item) = symbol_information(symbol) {
+                items.push(item);
+            }
+        }
+    }
+
+    items.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.location.uri.cmp(&right.location.uri))
+            .then(
+                left.location
+                    .range
+                    .start
+                    .line
+                    .cmp(&right.location.range.start.line),
+            )
+            .then(
+                left.location
+                    .range
+                    .start
+                    .character
+                    .cmp(&right.location.range.start.character),
+            )
+    });
+    items
+}
+
+fn projects_for_roots(roots: &[PathBuf]) -> Vec<nomo::project::Project> {
+    let mut projects = Vec::new();
+    for root in roots {
+        if let Ok(workspace) = nomo::project::discover_workspace(root) {
+            projects.extend(workspace.members);
+            continue;
+        }
+        if let Ok(project) = nomo::project::discover_project(root) {
+            projects.push(project);
+        }
+    }
+    projects
+}
+
+fn symbol_information(symbol: SemanticSymbol) -> Option<SymbolInformation> {
+    Some(SymbolInformation {
+        name: symbol.name,
+        kind: lsp_symbol_kind(symbol.kind),
+        tags: None,
+        #[allow(deprecated)]
+        deprecated: None,
+        location: Location {
+            uri: Url::from_file_path(&symbol.source_path).ok()?,
+            range: to_lsp_range(symbol.selection_range),
+        },
+        container_name: symbol
+            .source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_string()),
+    })
 }
 
 fn completion_kind(kind: SemanticSymbolKind) -> CompletionItemKind {
@@ -965,6 +1094,124 @@ mod tests {
             item.label == "add" && item.kind == Some(CompletionItemKind::FUNCTION)
         }));
         assert!(!items.iter().any(|item| item.label == "sub"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_symbols_include_project_symbols() {
+        let root = temp_test_root("workspace-symbol-project");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("src/main.nomo"),
+            "package app.main\n\npub struct User {\n    email: string\n}\n\npub fn make_user() -> User {\n    return User { email: \"hi\" }\n}\n",
+        )
+        .unwrap();
+
+        let symbols = workspace_symbols_for_roots(std::slice::from_ref(&project), "user", &[]);
+
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["User", "make_user"]
+        );
+        assert!(symbols.iter().all(|symbol| {
+            symbol
+                .location
+                .uri
+                .to_file_path()
+                .unwrap()
+                .starts_with(&project)
+        }));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_symbols_include_workspace_members() {
+        let root = temp_test_root("workspace-symbol-members");
+        reset_dir(&root);
+        let app = root.join("apps/cli");
+        let core = root.join("packages/core");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::create_dir_all(core.join("src")).unwrap();
+        fs::write(
+            root.join("nomo.toml"),
+            "[workspace]\nmembers = [\"apps/*\", \"packages/*\"]\n\n[workspace.package]\nnamespace = \"fynn\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("nomo.toml"),
+            "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("src/main.nomo"),
+            "package app.main\n\npub fn run_cli() -> void {\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            core.join("nomo.toml"),
+            "[package]\nname = \"core\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            core.join("src/main.nomo"),
+            "package core.main\n\npub fn run_core() -> void {\n}\n",
+        )
+        .unwrap();
+
+        let symbols = workspace_symbols_for_roots(std::slice::from_ref(&root), "run_", &[]);
+
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run_cli", "run_core"]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_symbols_use_open_document_overlays() {
+        let root = temp_test_root("workspace-symbol-overlay");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let module = project.join("src/math.nomo");
+        fs::write(
+            project.join("src/main.nomo"),
+            "package app.main\n\nfn main() -> void {\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &module,
+            "package app.math\n\npub fn stale_name() -> i64 {\n    return 1\n}\n",
+        )
+        .unwrap();
+        let overlay = "package app.math\n\npub fn fresh_name() -> i64 {\n    return 1\n}\n";
+
+        let symbols = workspace_symbols_for_roots(
+            std::slice::from_ref(&project),
+            "fresh",
+            &[(module, overlay.to_string())],
+        );
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "fresh_name");
         fs::remove_dir_all(&root).unwrap();
     }
 

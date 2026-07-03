@@ -232,7 +232,7 @@ fn diagnostics_for_text(
                 module_source_overrides,
             ),
             Err(message) => Err(NomoDiagnostic::new(
-                "N0901",
+                "E0901",
                 message,
                 &project.root.join("nomo.toml"),
                 1,

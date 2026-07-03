@@ -15,6 +15,7 @@ exactly the ones the compiler produces.
 - Full-document text synchronization (open / change / save / close)
 - Keyword completion
 - Hover for current-document declarations, including signatures and doc comments
+- Document symbols for current-document declarations and methods
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -62,6 +63,9 @@ Hover currently indexes the open document's declarations and shows the parsed
 signature plus any `///` or `/** */` item doc comment. Cross-module hover and
 workspace-wide definition/reference queries are planned as the next semantic API
 slices.
+
+Document symbols use the same parsed declaration index to power editor outline
+views for top-level structs, enums, constants, functions, and methods.
 
 ## Development
 

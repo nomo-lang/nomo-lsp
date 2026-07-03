@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
-use nomo::ast::{ConstDef, EnumDef, Function, ImplBlock, Param, SourceFile, StructDef, TypeRef};
+use nomo::ast::{
+    ConstDef, EnumDef, Function, ImplBlock, Param, SourceFile, Span, StructDef, TypeRef,
+};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -76,6 +78,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -169,6 +172,26 @@ impl LanguageServer for Backend {
         ))
     }
 
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        Ok(document_symbols_for_text(&path, &text))
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let path = uri
@@ -213,6 +236,9 @@ struct HoverSymbol {
     signature: String,
     docs: String,
     line: usize,
+    range: Range,
+    selection_range: Range,
+    symbol_kind: SymbolKind,
 }
 
 fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> {
@@ -230,6 +256,26 @@ fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> 
         }),
         range: None,
     })
+}
+
+#[allow(deprecated)]
+fn document_symbols_for_text(path: &Path, text: &str) -> Option<DocumentSymbolResponse> {
+    let symbols = hover_symbols(path, text).ok()?;
+    let items = symbols
+        .into_iter()
+        .map(|item| DocumentSymbol {
+            name: item.name,
+            detail: Some(item.signature),
+            kind: item.symbol_kind,
+            tags: None,
+            deprecated: None,
+            range: item.range,
+            selection_range: item.selection_range,
+            children: None,
+        })
+        .collect::<Vec<_>>();
+
+    Some(DocumentSymbolResponse::Nested(items))
 }
 
 fn hover_symbols(path: &Path, text: &str) -> std::result::Result<Vec<HoverSymbol>, NomoDiagnostic> {
@@ -252,6 +298,9 @@ fn symbols_from_ast(ast: &SourceFile, docs: &DocComments) -> Vec<HoverSymbol> {
                 .cloned()
                 .unwrap_or_default(),
             line: item.span.line,
+            range: line_range(&item.span),
+            selection_range: name_selection_range(&item.span, &item.name),
+            symbol_kind: SymbolKind::STRUCT,
         });
     }
     for item in &ast.enums {
@@ -265,6 +314,9 @@ fn symbols_from_ast(ast: &SourceFile, docs: &DocComments) -> Vec<HoverSymbol> {
                 .cloned()
                 .unwrap_or_default(),
             line: item.span.line,
+            range: line_range(&item.span),
+            selection_range: name_selection_range(&item.span, &item.name),
+            symbol_kind: SymbolKind::ENUM,
         });
     }
     for item in &ast.consts {
@@ -278,6 +330,9 @@ fn symbols_from_ast(ast: &SourceFile, docs: &DocComments) -> Vec<HoverSymbol> {
                 .cloned()
                 .unwrap_or_default(),
             line: item.span.line,
+            range: line_range(&item.span),
+            selection_range: name_selection_range(&item.span, &item.name),
+            symbol_kind: SymbolKind::CONSTANT,
         });
     }
     for item in &ast.functions {
@@ -291,6 +346,9 @@ fn symbols_from_ast(ast: &SourceFile, docs: &DocComments) -> Vec<HoverSymbol> {
                 .cloned()
                 .unwrap_or_default(),
             line: item.span.line,
+            range: line_range(&item.span),
+            selection_range: name_selection_range(&item.span, &item.name),
+            symbol_kind: SymbolKind::FUNCTION,
         });
     }
     for impl_block in &ast.impls {
@@ -314,8 +372,43 @@ fn method_symbols(impl_block: &ImplBlock, docs: &DocComments) -> Vec<HoverSymbol
                 .cloned()
                 .unwrap_or_default(),
             line: method.span.line,
+            range: line_range(&method.span),
+            selection_range: name_selection_range(&method.span, &method.name),
+            symbol_kind: SymbolKind::METHOD,
         })
         .collect()
+}
+
+fn line_range(span: &Span) -> Range {
+    let line = span.line.saturating_sub(1) as u32;
+    Range {
+        start: Position { line, character: 0 },
+        end: Position {
+            line,
+            character: span.text.chars().map(|ch| ch.len_utf16() as u32).sum(),
+        },
+    }
+}
+
+fn name_selection_range(span: &Span, name: &str) -> Range {
+    let line = span.line.saturating_sub(1) as u32;
+    let fallback_start = span.column.saturating_sub(1) as u32;
+    let start = span
+        .text
+        .find(name)
+        .map(|byte_index| span.text[..byte_index].encode_utf16().count() as u32)
+        .unwrap_or(fallback_start);
+    let end = start + name.encode_utf16().count() as u32;
+    Range {
+        start: Position {
+            line,
+            character: start,
+        },
+        end: Position {
+            line,
+            character: end,
+        },
+    }
 }
 
 fn hover_markdown(item: &HoverSymbol) -> String {
@@ -855,6 +948,53 @@ mod tests {
         );
 
         assert!(hover.is_none());
+    }
+
+    #[test]
+    fn document_symbols_return_top_level_declarations_and_methods() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nconst MAX: i64 = 10\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
+
+        let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
+        else {
+            panic!("expected document symbols");
+        };
+
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["User", "MAX", "main", "email"]);
+        assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
+        assert_eq!(symbols[1].kind, SymbolKind::CONSTANT);
+        assert_eq!(symbols[2].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[3].kind, SymbolKind::METHOD);
+        assert_eq!(
+            symbols[0].selection_range,
+            Range {
+                start: Position {
+                    line: 2,
+                    character: 11,
+                },
+                end: Position {
+                    line: 2,
+                    character: 15,
+                },
+            }
+        );
+        assert_eq!(
+            symbols[3].detail.as_deref(),
+            Some("pub fn User.email(self: User) -> string")
+        );
+    }
+
+    #[test]
+    fn document_symbols_return_none_for_invalid_source() {
+        let path = PathBuf::from("main.nomo");
+
+        let symbols = document_symbols_for_text(&path, "package app.main\n\nfn main( {\n");
+
+        assert!(symbols.is_none());
     }
 
     #[test]

@@ -79,6 +79,7 @@ impl LanguageServer for Backend {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -192,6 +193,31 @@ impl LanguageServer for Backend {
         Ok(document_symbols_for_text(&path, &text))
     }
 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        Ok(definition_for_text(
+            &path,
+            &text,
+            uri,
+            params.text_document_position_params.position,
+        ))
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let path = uri
@@ -276,6 +302,25 @@ fn document_symbols_for_text(path: &Path, text: &str) -> Option<DocumentSymbolRe
         .collect::<Vec<_>>();
 
     Some(DocumentSymbolResponse::Nested(items))
+}
+
+fn definition_for_text(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+) -> Option<GotoDefinitionResponse> {
+    let symbol = identifier_at_position(text, position)?;
+    let symbols = hover_symbols(path, text).ok()?;
+    let item = symbols
+        .iter()
+        .filter(|item| item.name == symbol)
+        .min_by_key(|item| item.line)?;
+
+    Some(GotoDefinitionResponse::Scalar(Location {
+        uri,
+        range: item.selection_range,
+    }))
 }
 
 fn hover_symbols(path: &Path, text: &str) -> std::result::Result<Vec<HoverSymbol>, NomoDiagnostic> {
@@ -995,6 +1040,96 @@ mod tests {
         let symbols = document_symbols_for_text(&path, "package app.main\n\nfn main( {\n");
 
         assert!(symbols.is_none());
+    }
+
+    #[test]
+    fn definition_returns_function_declaration_location() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri.clone(),
+            Position {
+                line: 7,
+                character: 22,
+            },
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(location.uri, uri);
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 2,
+                    character: 3,
+                },
+                end: Position {
+                    line: 2,
+                    character: 6,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn definition_returns_type_declaration_location() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 7,
+                character: 14,
+            },
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 2,
+                    character: 11,
+                },
+                end: Position {
+                    line: 2,
+                    character: 15,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn definition_returns_none_for_unknown_identifier() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 3,
+                character: 8,
+            },
+        );
+
+        assert!(definition.is_none());
     }
 
     #[test]

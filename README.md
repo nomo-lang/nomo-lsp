@@ -16,6 +16,7 @@ exactly the ones the compiler produces.
 - Keyword completion
 - Hover for current-document declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
+- Go-to-definition for current-document declarations
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -66,6 +67,10 @@ slices.
 
 Document symbols use the same parsed declaration index to power editor outline
 views for top-level structs, enums, constants, functions, and methods.
+
+Go-to-definition currently resolves references to declarations in the same open
+document. Cross-module and workspace-wide definition lookup are planned as the
+next semantic graph slices.
 
 ## Development
 

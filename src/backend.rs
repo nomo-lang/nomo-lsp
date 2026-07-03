@@ -154,36 +154,32 @@ impl LanguageServer for Backend {
 }
 
 fn diagnostics_for_text(path: &Path, text: &str) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let external_import_roots = external_import_roots_for_path(path).unwrap_or_default();
-    match nomo::check_source_text_with_external_imports(path, text, &external_import_roots) {
+    let result = if let Ok(project) = nomo::project::discover_project(path) {
+        match nomo::project::project_module_context(&project) {
+            Ok(context) => nomo::check_source_text_with_project_modules(
+                path,
+                text,
+                Some(&context.local_source_root),
+                &context.external_import_roots,
+                &context.external_modules,
+            ),
+            Err(message) => Err(NomoDiagnostic::new(
+                "N0901",
+                message,
+                &project.root.join("nomo.toml"),
+                1,
+                1,
+                1,
+                "",
+            )),
+        }
+    } else {
+        nomo::check_source_text(path, text)
+    };
+    match result {
         Ok(_) => Vec::new(),
         Err(diag) => vec![to_lsp_diagnostic(&diag)],
     }
-}
-
-fn external_import_roots_for_path(path: &Path) -> std::result::Result<Vec<String>, String> {
-    let Some(search_root) = path.parent() else {
-        return Ok(Vec::new());
-    };
-    let Some(manifest_root) = find_manifest_root(search_root) else {
-        return Ok(Vec::new());
-    };
-    let manifest = nomo::project::parse_manifest_at_root(&manifest_root)?;
-    Ok(manifest
-        .dependencies
-        .into_iter()
-        .map(|dependency| dependency.alias)
-        .filter(|alias| alias != "std")
-        .collect())
-}
-
-fn find_manifest_root(start: &Path) -> Option<PathBuf> {
-    for candidate in start.ancestors() {
-        if candidate.join("nomo.toml").exists() {
-            return Some(candidate.to_path_buf());
-        }
-    }
-    None
 }
 
 /// Convert a compiler diagnostic (1-based line/column) into an LSP diagnostic
@@ -236,6 +232,68 @@ mod tests {
         let diagnostics = diagnostics_for_text(
             &source,
             "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_accept_local_project_module_imports() {
+        let root = temp_test_root("local-module-imports");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("src/math.nomo"),
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        let source = project.join("src/main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n",
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_accept_path_dependency_module_imports() {
+        let root = temp_test_root("path-dependency-module-imports");
+        reset_dir(&root);
+        let dependency = root.join("utils");
+        let project = root.join("hello");
+        fs::create_dir_all(dependency.join("src")).unwrap();
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
+        fs::write(
+            dependency.join("src/path.nomo"),
+            "package local_utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"fynn/utils\", path = \"../utils\" }\n",
+        )
+        .unwrap();
+        let source = project.join("src/main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(40, 2)\n}\n",
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");

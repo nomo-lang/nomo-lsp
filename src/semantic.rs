@@ -76,9 +76,11 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         TokenKind::Package => keyword("package"),
         TokenKind::Import => keyword("import"),
         TokenKind::Pub => keyword("pub"),
+        TokenKind::Impl => keyword("impl"),
         TokenKind::Fn => keyword("fn"),
         TokenKind::Struct => keyword("struct"),
         TokenKind::Enum => keyword("enum"),
+        TokenKind::Const => keyword("const"),
         TokenKind::If => keyword("if"),
         TokenKind::Else => keyword("else"),
         TokenKind::Match => keyword("match"),
@@ -87,6 +89,11 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         TokenKind::Let => keyword("let"),
         TokenKind::Mut => keyword("mut"),
         TokenKind::Return => keyword("return"),
+        TokenKind::For => keyword("for"),
+        TokenKind::In => keyword("in"),
+        TokenKind::Break => keyword("break"),
+        TokenKind::Continue => keyword("continue"),
+        TokenKind::Defer => keyword("defer"),
         TokenKind::Void => keyword("void"),
         TokenKind::True => keyword("true"),
         TokenKind::False => keyword("false"),
@@ -108,6 +115,7 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         | TokenKind::Equal
         | TokenKind::EqualEqual
         | TokenKind::BangEqual
+        | TokenKind::Star
         | TokenKind::Less
         | TokenKind::Greater
         | TokenKind::Question => Some((OPERATOR, 1)),
@@ -115,5 +123,27 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
             Some((OPERATOR, 2))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_current_v0_1_keywords_and_operators() {
+        for (kind, text) in [
+            (TokenKind::Impl, "impl"),
+            (TokenKind::Const, "const"),
+            (TokenKind::For, "for"),
+            (TokenKind::In, "in"),
+            (TokenKind::Break, "break"),
+            (TokenKind::Continue, "continue"),
+            (TokenKind::Defer, "defer"),
+        ] {
+            assert_eq!(classify(&kind), Some((KEYWORD, text.len() as u32)));
+        }
+
+        assert_eq!(classify(&TokenKind::Star), Some((OPERATOR, 1)));
     }
 }

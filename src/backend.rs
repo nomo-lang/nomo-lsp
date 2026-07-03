@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
@@ -144,16 +144,22 @@ impl LanguageServer for Backend {
         self.documents.remove(&params.text_document.uri);
     }
 
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let items = KEYWORDS
-            .iter()
-            .map(|kw| CompletionItem {
-                label: kw.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            })
-            .collect();
-        Ok(Some(CompletionResponse::Array(items)))
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let text = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok());
+        let source_overrides = self.document_overrides();
+        Ok(Some(CompletionResponse::Array(completion_for_document(
+            &path,
+            text.as_deref(),
+            &source_overrides,
+        ))))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -318,6 +324,90 @@ fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> 
         .ok()??;
 
     hover_for_symbol(&item)
+}
+
+fn completion_for_document(
+    path: &Path,
+    text: Option<&str>,
+    source_overrides: &[(PathBuf, String)],
+) -> Vec<CompletionItem> {
+    let mut seen = BTreeSet::new();
+    let mut items = KEYWORDS
+        .iter()
+        .filter_map(|kw| {
+            seen.insert((*kw).to_string()).then(|| CompletionItem {
+                label: kw.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let Some(text) = text else {
+        return items;
+    };
+    let mut symbols = if let Ok(project) = nomo::project::discover_project(path) {
+        let source_overrides = overrides_with_current(path, text, source_overrides);
+        compiler_semantic::symbols_for_project_with_overrides(&project, &source_overrides)
+            .unwrap_or_default()
+    } else {
+        compiler_semantic::symbols_for_text(path, text).unwrap_or_default()
+    };
+    symbols.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.source_path.cmp(&right.source_path))
+            .then(left.line.cmp(&right.line))
+    });
+
+    for symbol in symbols {
+        if seen.insert(symbol.name.clone()) {
+            items.push(completion_item_for_symbol(symbol));
+        }
+    }
+    items
+}
+
+fn completion_item_for_symbol(symbol: SemanticSymbol) -> CompletionItem {
+    CompletionItem {
+        label: symbol.name,
+        kind: Some(completion_kind(symbol.kind)),
+        detail: Some(symbol.signature),
+        documentation: (!symbol.docs.is_empty()).then(|| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: symbol.docs,
+            })
+        }),
+        ..Default::default()
+    }
+}
+
+fn completion_kind(kind: SemanticSymbolKind) -> CompletionItemKind {
+    match kind {
+        SemanticSymbolKind::Struct => CompletionItemKind::STRUCT,
+        SemanticSymbolKind::Enum => CompletionItemKind::ENUM,
+        SemanticSymbolKind::Const => CompletionItemKind::CONSTANT,
+        SemanticSymbolKind::Function => CompletionItemKind::FUNCTION,
+        SemanticSymbolKind::Method => CompletionItemKind::METHOD,
+    }
+}
+
+fn overrides_with_current(
+    path: &Path,
+    source: &str,
+    source_overrides: &[(PathBuf, String)],
+) -> Vec<(PathBuf, String)> {
+    let mut overrides = source_overrides.to_vec();
+    if let Some(existing) = overrides
+        .iter_mut()
+        .find(|(entry_path, _)| entry_path == path)
+    {
+        existing.1 = source.to_string();
+    } else {
+        overrides.push((path.to_path_buf(), source.to_string()));
+    }
+    overrides
 }
 
 fn hover_for_document(
@@ -803,6 +893,78 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("json.parser"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn completion_includes_keywords_and_current_document_symbols() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nstruct User {\n    email: string\n}\n";
+
+        let items = completion_for_document(&path, Some(text), &[]);
+
+        assert!(
+            items.iter().any(|item| {
+                item.label == "fn" && item.kind == Some(CompletionItemKind::KEYWORD)
+            })
+        );
+        let add = items.iter().find(|item| item.label == "add").unwrap();
+        assert_eq!(add.kind, Some(CompletionItemKind::FUNCTION));
+        assert_eq!(
+            add.detail.as_deref(),
+            Some("pub fn add(a: i64, b: i64) -> i64")
+        );
+        assert!(matches!(
+            add.documentation.as_ref(),
+            Some(Documentation::MarkupContent(markup)) if markup.value == "Adds numbers."
+        ));
+        assert!(
+            items.iter().any(|item| {
+                item.label == "User" && item.kind == Some(CompletionItemKind::STRUCT)
+            })
+        );
+    }
+
+    #[test]
+    fn completion_keeps_keywords_for_invalid_source() {
+        let path = PathBuf::from("main.nomo");
+
+        let items = completion_for_document(&path, Some("package app.main\n\nfn main( {\n"), &[]);
+
+        assert!(items.iter().any(|item| item.label == "fn"));
+        assert!(!items.iter().any(|item| item.label == "main"));
+    }
+
+    #[test]
+    fn completion_includes_project_module_symbols_with_overlays() {
+        let root = temp_test_root("completion-project-overlay");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
+        )
+        .unwrap();
+        let overlay =
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+
+        let items =
+            completion_for_document(&main, Some(main_source), &[(math, overlay.to_string())]);
+
+        assert!(items.iter().any(|item| {
+            item.label == "add" && item.kind == Some(CompletionItemKind::FUNCTION)
+        }));
+        assert!(!items.iter().any(|item| item.label == "sub"));
         fs::remove_dir_all(&root).unwrap();
     }
 

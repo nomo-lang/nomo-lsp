@@ -13,7 +13,7 @@ exactly the ones the compiler produces.
 - Real-time diagnostics from the Nomo compiler front-end
 - Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
-- Keyword completion
+- Keyword and semantic symbol completion
 - Hover for current-document and local project module declarations, including signatures and doc comments
 - Document symbols for current-document declarations and methods
 - Go-to-definition for current-document and local project module declarations
@@ -34,9 +34,9 @@ language:
 `nomo-lsp` depends on [`nomo`](https://github.com/nomo-lang/nomo); those editor
 clients depend on `nomo-lsp`.
 
-Hover, document symbols, go-to-definition, and references are backed by the
-compiler crate's reusable `semantic` API. The LSP server only adapts compiler
-symbol ranges and signatures into LSP types.
+Completion, hover, document symbols, go-to-definition, references, and rename
+are backed by the compiler crate's reusable `semantic` API. The LSP server only
+adapts compiler symbol ranges and signatures into LSP types.
 
 ## Requirements
 
@@ -65,6 +65,11 @@ Formatting uses the same AST-based formatter as `nomo fmt`, applied as a single
 full-document edit against the editor's current open buffer. If the current text
 does not parse, the server returns no formatting edit and leaves diagnostics to
 the normal compiler diagnostic flow.
+
+Completion always includes v0.1 keywords. When the current document parses, it
+also includes top-level declarations and methods from the current document or,
+inside a project, local `src/**/*.nomo` modules. Open editor buffers are used as
+overlays so unsaved module declarations can appear in completion.
 
 Hover indexes the open document plus local project `src/**/*.nomo` modules when
 a nearest `nomo.toml` is available, and shows the parsed signature plus any

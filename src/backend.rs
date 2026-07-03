@@ -65,8 +65,16 @@ const STD_IMPORTS: &[&str] = &[
     "std.result.Result",
     "std.result.map_err",
     "std.string",
+    "std.string.contains",
     "std.string.concat",
+    "std.string.ends_with",
+    "std.string.is_empty",
     "std.string.len",
+    "std.string.split",
+    "std.string.starts_with",
+    "std.string.to_lower",
+    "std.string.to_upper",
+    "std.string.trim",
 ];
 
 pub struct Backend {

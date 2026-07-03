@@ -37,8 +37,19 @@ impl Backend {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let module_source_overrides = self
+            .documents
+            .iter()
+            .filter_map(|entry| {
+                let uri = entry.key();
+                let path = uri
+                    .to_file_path()
+                    .unwrap_or_else(|_| PathBuf::from(uri.path()));
+                Some((path, entry.value().clone()))
+            })
+            .collect::<Vec<_>>();
 
-        let diagnostics = diagnostics_for_text(&path, text);
+        let diagnostics = diagnostics_for_text(&path, text, &module_source_overrides);
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
@@ -153,15 +164,20 @@ impl LanguageServer for Backend {
     }
 }
 
-fn diagnostics_for_text(path: &Path, text: &str) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+fn diagnostics_for_text(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let result = if let Ok(project) = nomo::project::discover_project(path) {
         match nomo::project::project_module_context(&project) {
-            Ok(context) => nomo::check_source_text_with_project_modules(
+            Ok(context) => nomo::check_source_text_with_project_modules_and_overrides(
                 path,
                 text,
                 Some(&context.local_source_root),
                 &context.external_import_roots,
                 &context.external_modules,
+                module_source_overrides,
             ),
             Err(message) => Err(NomoDiagnostic::new(
                 "N0901",
@@ -232,6 +248,7 @@ mod tests {
         let diagnostics = diagnostics_for_text(
             &source,
             "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+            &[],
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -259,6 +276,40 @@ mod tests {
         let diagnostics = diagnostics_for_text(
             &source,
             "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n",
+            &[],
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_use_open_document_overlay_for_imported_modules() {
+        let root = temp_test_root("local-module-overlay");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let module_path = project.join("src/math.nomo");
+        fs::write(
+            &module_path,
+            "package app.math\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        let source = project.join("src/main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n",
+            &[(
+                module_path,
+                "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n"
+                    .to_string(),
+            )],
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -294,6 +345,7 @@ mod tests {
         let diagnostics = diagnostics_for_text(
             &source,
             "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(40, 2)\n}\n",
+            &[],
         );
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -309,6 +361,7 @@ mod tests {
         let diagnostics = diagnostics_for_text(
             &source,
             "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+            &[],
         );
 
         assert_eq!(diagnostics.len(), 1);

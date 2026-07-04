@@ -1655,9 +1655,6 @@ fn code_actions_for_text(
     diagnostics: &[tower_lsp::lsp_types::Diagnostic],
 ) -> Option<CodeActionResponse> {
     let diagnostic = compiler_diagnostic_for_text(path, text, module_source_overrides).err()?;
-    if diagnostic.suggestions.is_empty() {
-        return Some(Vec::new());
-    }
     let lsp_diagnostic = diagnostics
         .iter()
         .find(|item| {
@@ -1668,7 +1665,7 @@ fn code_actions_for_text(
         .cloned()
         .unwrap_or_else(|| to_lsp_diagnostic(&diagnostic));
 
-    let actions = diagnostic
+    let mut actions = diagnostic
         .suggestions
         .iter()
         .map(|suggestion| {
@@ -1694,7 +1691,137 @@ fn code_actions_for_text(
             })
         })
         .collect::<Vec<_>>();
+    actions.extend(add_import_code_actions(
+        path,
+        text,
+        &uri,
+        module_source_overrides,
+        &diagnostic,
+        &lsp_diagnostic,
+    ));
     Some(actions)
+}
+
+fn add_import_code_actions(
+    path: &Path,
+    text: &str,
+    uri: &Url,
+    module_source_overrides: &[(PathBuf, String)],
+    diagnostic: &NomoDiagnostic,
+    lsp_diagnostic: &tower_lsp::lsp_types::Diagnostic,
+) -> Vec<CodeActionOrCommand> {
+    if !matches!(diagnostic.code, "E0303" | "E0305") {
+        return Vec::new();
+    }
+    let Some(symbol_name) = diagnostic_symbol_name(diagnostic).or_else(|| {
+        compiler_semantic::identifier_at_position(
+            text,
+            TextPosition {
+                line: diagnostic.line.saturating_sub(1) as u32,
+                character: diagnostic.column.saturating_sub(1) as u32,
+            },
+        )
+    }) else {
+        return Vec::new();
+    };
+    let Ok(project) = nomo::project::discover_project(path) else {
+        return Vec::new();
+    };
+    let Some(local_root) = local_import_root(text) else {
+        return Vec::new();
+    };
+    let source_root = project.root.join("src");
+    let current_imports = imported_paths(text);
+    let Ok(symbols) = compiler_semantic::symbols_for_project_with_overrides(
+        &project,
+        &overrides_with_current(path, text, module_source_overrides),
+    ) else {
+        return Vec::new();
+    };
+
+    let mut imports = symbols
+        .into_iter()
+        .filter(|symbol| symbol.name == symbol_name)
+        .filter(|symbol| symbol.source_path != path)
+        .filter(|symbol| is_importable_symbol(symbol))
+        .filter_map(|symbol| {
+            module_import_from_file(
+                &normalize_path(&source_root),
+                &local_root,
+                &normalize_path(&symbol.source_path),
+            )
+        })
+        .filter(|import| import != &format!("{local_root}.main"))
+        .filter(|import| !current_imports.contains(import))
+        .collect::<Vec<_>>();
+    imports.sort();
+    imports.dedup();
+
+    let insertion_range = import_insertion_range(text);
+    imports
+        .into_iter()
+        .map(|import| {
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("add `import {import}` to use `{symbol_name}`"),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![lsp_diagnostic.clone()]),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(HashMap::from([(
+                        uri.clone(),
+                        vec![TextEdit {
+                            range: insertion_range,
+                            new_text: format!("import {import}\n"),
+                        }],
+                    )])),
+                    document_changes: None,
+                    change_annotations: None,
+                }),
+                command: None,
+                is_preferred: Some(false),
+                disabled: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+fn diagnostic_symbol_name(diagnostic: &NomoDiagnostic) -> Option<String> {
+    let (_, rest) = diagnostic.message.split_once('`')?;
+    let (name, _) = rest.split_once('`')?;
+    is_nomo_identifier(name).then(|| name.to_string())
+}
+
+fn is_importable_symbol(symbol: &SemanticSymbol) -> bool {
+    matches!(
+        symbol.kind,
+        SemanticSymbolKind::Struct
+            | SemanticSymbolKind::Enum
+            | SemanticSymbolKind::Const
+            | SemanticSymbolKind::Function
+    ) && symbol.signature.starts_with("pub ")
+}
+
+fn imported_paths(text: &str) -> BTreeSet<String> {
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("import "))
+        .map(|import| import.trim().to_string())
+        .collect()
+}
+
+fn import_insertion_range(text: &str) -> Range {
+    let mut line = 1u32;
+    for (index, source_line) in text.lines().enumerate() {
+        let trimmed = source_line.trim();
+        if trimmed.starts_with("import ") {
+            line = index as u32 + 1;
+        } else if trimmed.starts_with("package ") && line == 1 {
+            line = index as u32 + 1;
+        }
+    }
+    Range {
+        start: Position { line, character: 0 },
+        end: Position { line, character: 0 },
+    }
 }
 
 fn suggestion_range(suggestion: &nomo::Suggestion) -> Range {
@@ -2432,6 +2559,89 @@ mod tests {
                 new_text: "import std.io\n".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn code_actions_add_import_for_local_module_symbol() {
+        let root = temp_test_root("code-action-add-local-import");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main_path = project.join("src/main.nomo");
+        let math_path = project.join("src/math.nomo");
+        let text = "package app.main\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n";
+        fs::write(&main_path, text).unwrap();
+        fs::write(
+            math_path,
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        let uri = Url::from_file_path(&main_path).unwrap();
+        let diagnostics = diagnostics_for_text(&main_path, text, &[]);
+
+        let actions =
+            code_actions_for_text(&main_path, text, uri.clone(), &[], &diagnostics).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(action.title, "add `import app.math` to use `add`");
+        assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(
+            edits,
+            &vec![TextEdit {
+                range: Range {
+                    start: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                },
+                new_text: "import app.math\n".to_string(),
+            }]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn code_actions_do_not_add_import_for_private_module_symbol() {
+        let root = temp_test_root("code-action-no-private-import");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main_path = project.join("src/main.nomo");
+        let math_path = project.join("src/math.nomo");
+        let text =
+            "package app.main\n\nfn main() -> void {\n    let total: i64 = hidden(40, 2)\n}\n";
+        fs::write(&main_path, text).unwrap();
+        fs::write(
+            math_path,
+            "package app.math\n\nfn hidden(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        let uri = Url::from_file_path(&main_path).unwrap();
+        let diagnostics = diagnostics_for_text(&main_path, text, &[]);
+
+        let actions = code_actions_for_text(&main_path, text, uri, &[], &diagnostics).unwrap();
+
+        assert!(actions.is_empty());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

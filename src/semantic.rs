@@ -1,7 +1,8 @@
+use std::cmp::Ordering;
 use std::path::Path;
 
 use nomo::{Token, TokenKind, lex};
-use tower_lsp::lsp_types::{SemanticToken, SemanticTokenType};
+use tower_lsp::lsp_types::{Position, Range, SemanticToken, SemanticTokenType};
 
 // Indices into the legend below. Keep these in sync with `token_types`.
 const KEYWORD: u32 = 0;
@@ -31,6 +32,14 @@ pub fn token_types() -> Vec<SemanticTokenType> {
 /// Lex the source and emit delta-encoded semantic tokens. Lexing errors yield no
 /// tokens (the diagnostic pipeline reports the problem separately).
 pub fn tokens(path: &Path, source: &str) -> Vec<SemanticToken> {
+    tokens_for_range(path, source, None)
+}
+
+pub fn tokens_in_range(path: &Path, source: &str, range: Range) -> Vec<SemanticToken> {
+    tokens_for_range(path, source, Some(range))
+}
+
+fn tokens_for_range(path: &Path, source: &str, range: Option<Range>) -> Vec<SemanticToken> {
     let Ok(raw) = lex(path, source) else {
         return Vec::new();
     };
@@ -52,6 +61,13 @@ pub fn tokens(path: &Path, source: &str) -> Vec<SemanticToken> {
         // Lexer positions are 1-based; LSP wants 0-based.
         let line = token.line.saturating_sub(1) as u32;
         let start = token.column.saturating_sub(1) as u32;
+        let end = start.saturating_add(length);
+        if range
+            .as_ref()
+            .is_some_and(|range| !token_overlaps_range(line, start, end, range))
+        {
+            continue;
+        }
 
         let delta_line = line - prev_line;
         let delta_start = if delta_line == 0 {
@@ -73,6 +89,25 @@ pub fn tokens(path: &Path, source: &str) -> Vec<SemanticToken> {
     }
 
     result
+}
+
+fn token_overlaps_range(line: u32, start: u32, end: u32, range: &Range) -> bool {
+    let token_start = Position {
+        line,
+        character: start,
+    };
+    let token_end = Position {
+        line,
+        character: end,
+    };
+    compare_position(token_end, range.start) == Ordering::Greater
+        && compare_position(token_start, range.end) == Ordering::Less
+}
+
+fn compare_position(left: Position, right: Position) -> Ordering {
+    left.line
+        .cmp(&right.line)
+        .then(left.character.cmp(&right.character))
 }
 
 #[derive(Debug, Default)]
@@ -397,5 +432,55 @@ mod tests {
         assert!(classified.contains(&("Ok", 8, Some(ENUM_MEMBER))));
         assert!(classified.contains(&("Ok", 14, Some(ENUM_MEMBER))));
         assert!(classified.contains(&("Err", 9, Some(ENUM_MEMBER))));
+    }
+
+    #[test]
+    fn emits_semantic_tokens_for_requested_range() {
+        let source = "package app.main\n\nstruct User {\n    name: string\n}\n\nfn greet(user: User) -> void {\n    println(user.name)\n    let other: User = User { name: \"Ada\" }\n}\n";
+        let range = Range {
+            start: Position {
+                line: 6,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let data = tokens_in_range(Path::new("main.nomo"), source, range);
+        let absolute = absolute_tokens(&data);
+
+        assert!(!absolute.is_empty());
+        assert!(absolute.iter().all(|(line, _, _)| (6..10).contains(line)));
+        assert!(!absolute.iter().any(|(line, _, _)| *line == 0 || *line == 2));
+        assert!(
+            absolute
+                .iter()
+                .any(|(_, _, token_type)| *token_type == FUNCTION)
+        );
+        assert!(
+            absolute
+                .iter()
+                .any(|(_, _, token_type)| *token_type == PROPERTY)
+        );
+        assert_eq!(data[0].delta_line, 6);
+    }
+
+    fn absolute_tokens(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32)> {
+        let mut line = 0u32;
+        let mut start = 0u32;
+        tokens
+            .iter()
+            .map(|token| {
+                line += token.delta_line;
+                if token.delta_line == 0 {
+                    start += token.delta_start;
+                } else {
+                    start = token.delta_start;
+                }
+                (line, start, token.token_type)
+            })
+            .collect()
     }
 }

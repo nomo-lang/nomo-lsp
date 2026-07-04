@@ -295,6 +295,13 @@ impl Backend {
             .map(|entry| entry.value().clone())
             .collect()
     }
+
+    fn document_text(&self, uri: &Url, path: &Path) -> Option<String> {
+        self.documents
+            .get(uri)
+            .map(|text| text.clone())
+            .or_else(|| std::fs::read_to_string(path).ok())
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -345,7 +352,7 @@ impl LanguageServer for Backend {
                                 token_modifiers: vec![],
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: None,
+                            range: Some(true),
                             work_done_progress_options: Default::default(),
                         },
                     ),
@@ -638,15 +645,34 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|t| t.clone()) else {
-            return Ok(None);
-        };
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self.document_text(&uri, &path) else {
+            return Ok(None);
+        };
 
         let data = semantic::tokens(&path, &text);
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self.document_text(&uri, &path) else {
+            return Ok(None);
+        };
+
+        let data = semantic::tokens_in_range(&path, &text, params.range);
+        Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data,
         })))

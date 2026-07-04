@@ -1048,6 +1048,8 @@ fn completion_kind(kind: SemanticSymbolKind) -> CompletionItemKind {
         SemanticSymbolKind::Enum => CompletionItemKind::ENUM,
         SemanticSymbolKind::Field => CompletionItemKind::FIELD,
         SemanticSymbolKind::Variant => CompletionItemKind::ENUM_MEMBER,
+        SemanticSymbolKind::Interface => CompletionItemKind::INTERFACE,
+        SemanticSymbolKind::InterfaceMethod => CompletionItemKind::METHOD,
         SemanticSymbolKind::Const => CompletionItemKind::CONSTANT,
         SemanticSymbolKind::Function => CompletionItemKind::FUNCTION,
         SemanticSymbolKind::ExternFunction => CompletionItemKind::FUNCTION,
@@ -1132,6 +1134,19 @@ fn document_symbols_for_text(path: &Path, text: &str) -> Option<DocumentSymbolRe
                     items.push(document_symbol(symbol));
                 }
             }
+            SemanticSymbolKind::InterfaceMethod => {
+                let Some(owner) =
+                    interface_method_owner_name(&symbol.signature).map(str::to_string)
+                else {
+                    items.push(document_symbol(symbol));
+                    continue;
+                };
+                if let Err(symbol) =
+                    push_child_symbol(&mut items, &owner, SymbolKind::INTERFACE, symbol)
+                {
+                    items.push(document_symbol(symbol));
+                }
+            }
             _ => items.push(document_symbol(symbol)),
         }
     }
@@ -1184,6 +1199,13 @@ fn field_owner_name(signature: &str) -> Option<&str> {
 
 fn variant_owner_name(signature: &str) -> Option<&str> {
     let rest = signature.strip_prefix("variant ")?;
+    let path = rest.split('(').next().unwrap_or(rest);
+    let (owner, _) = path.rsplit_once('.')?;
+    Some(owner)
+}
+
+fn interface_method_owner_name(signature: &str) -> Option<&str> {
+    let rest = signature.strip_prefix("fn ")?;
     let path = rest.split('(').next().unwrap_or(rest);
     let (owner, _) = path.rsplit_once('.')?;
     Some(owner)
@@ -1465,6 +1487,8 @@ fn semantic_kind_label(kind: SemanticSymbolKind) -> &'static str {
         SemanticSymbolKind::Enum => "enum",
         SemanticSymbolKind::Field => "field",
         SemanticSymbolKind::Variant => "enum variant",
+        SemanticSymbolKind::Interface => "interface",
+        SemanticSymbolKind::InterfaceMethod => "interface method",
         SemanticSymbolKind::Const => "const",
         SemanticSymbolKind::Function => "function",
         SemanticSymbolKind::ExternFunction => "extern function",
@@ -1478,6 +1502,8 @@ fn lsp_symbol_kind(kind: SemanticSymbolKind) -> SymbolKind {
         SemanticSymbolKind::Enum => SymbolKind::ENUM,
         SemanticSymbolKind::Field => SymbolKind::FIELD,
         SemanticSymbolKind::Variant => SymbolKind::ENUM_MEMBER,
+        SemanticSymbolKind::Interface => SymbolKind::INTERFACE,
+        SemanticSymbolKind::InterfaceMethod => SymbolKind::METHOD,
         SemanticSymbolKind::Const => SymbolKind::CONSTANT,
         SemanticSymbolKind::Function => SymbolKind::FUNCTION,
         SemanticSymbolKind::ExternFunction => SymbolKind::FUNCTION,
@@ -2072,6 +2098,7 @@ fn is_importable_symbol(symbol: &SemanticSymbol) -> bool {
         symbol.kind,
         SemanticSymbolKind::Struct
             | SemanticSymbolKind::Enum
+            | SemanticSymbolKind::Interface
             | SemanticSymbolKind::Const
             | SemanticSymbolKind::Function
     ) && symbol.signature.starts_with("pub ")
@@ -3322,6 +3349,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_returns_interface_method_signature_and_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/// Display contract.\npub interface Display {\n    /// Converts to text.\n    fn to_string(self) -> string\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 5,
+                character: 10,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(
+            markup
+                .value
+                .contains("fn Display.to_string(self: Self) -> string")
+        );
+        assert!(markup.value.contains("Converts to text."));
+        assert!(markup.value.contains("interface method"));
+    }
+
+    #[test]
     fn hover_returns_none_for_unknown_identifier() {
         let path = PathBuf::from("main.nomo");
         let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
@@ -3341,7 +3395,7 @@ mod tests {
     #[test]
     fn document_symbols_nest_fields_and_variants_under_parent_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\nconst MAX: i64 = 10\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\npub interface Display {\n    fn to_string(self) -> string\n}\n\nconst MAX: i64 = 10\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
 
         let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
         else {
@@ -3354,14 +3408,15 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             names,
-            vec!["User", "Status", "MAX", "main", "puts", "email"]
+            vec!["User", "Status", "Display", "MAX", "main", "puts", "email"]
         );
         assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
         assert_eq!(symbols[1].kind, SymbolKind::ENUM);
-        assert_eq!(symbols[2].kind, SymbolKind::CONSTANT);
-        assert_eq!(symbols[3].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[2].kind, SymbolKind::INTERFACE);
+        assert_eq!(symbols[3].kind, SymbolKind::CONSTANT);
         assert_eq!(symbols[4].kind, SymbolKind::FUNCTION);
-        assert_eq!(symbols[5].kind, SymbolKind::METHOD);
+        assert_eq!(symbols[5].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[6].kind, SymbolKind::METHOD);
         let user_children = symbols[0].children.as_ref().expect("struct children");
         assert_eq!(user_children.len(), 1);
         assert_eq!(user_children[0].name, "email");
@@ -3375,6 +3430,14 @@ mod tests {
             vec!["Ready", "Done"]
         );
         assert_eq!(status_children[0].kind, SymbolKind::ENUM_MEMBER);
+        let display_children = symbols[2].children.as_ref().expect("interface children");
+        assert_eq!(display_children.len(), 1);
+        assert_eq!(display_children[0].name, "to_string");
+        assert_eq!(display_children[0].kind, SymbolKind::METHOD);
+        assert_eq!(
+            display_children[0].detail.as_deref(),
+            Some("fn Display.to_string(self: Self) -> string")
+        );
         assert_eq!(
             symbols[0].selection_range,
             Range {
@@ -3389,11 +3452,11 @@ mod tests {
             }
         );
         assert_eq!(
-            symbols[4].detail.as_deref(),
+            symbols[5].detail.as_deref(),
             Some("extern \"C\" fn puts(message: string) -> i32")
         );
         assert_eq!(
-            symbols[5].detail.as_deref(),
+            symbols[6].detail.as_deref(),
             Some("pub fn User.email(self: User) -> string")
         );
     }

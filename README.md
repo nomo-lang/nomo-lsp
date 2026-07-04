@@ -15,7 +15,7 @@ exactly the ones the compiler produces.
 - Full-document text synchronization (open / change / save / close)
 - Keyword, import path and semantic symbol completion
 - Hover for current-document and local project module declarations, including signatures and doc comments
-- Document symbols for current-document declarations, extern functions, methods, fields and enum variants
+- Document symbols for current-document declarations, extern functions, interfaces, methods, fields and enum variants
 - Workspace symbols for project and workspace declarations
 - Go-to-definition for current-document and local project module declarations
 - Find references for current-document and local project module declarations
@@ -87,10 +87,10 @@ the same hover path. Open editor buffers are used as overlays so unsaved module
 edits can participate in hover results.
 
 Document symbols use the same parsed declaration index to power editor outline
-views for top-level structs, enums, constants, functions, extern functions, and
-methods. Struct fields and enum variants are nested under their parent type so
-outlines preserve the source model instead of flattening members into the top
-level.
+views for top-level structs, enums, interfaces, constants, functions, extern
+functions, and methods. Struct fields, enum variants, and interface methods are
+nested under their parent type so outlines preserve the source model instead of
+flattening members into the top level.
 
 Workspace symbols index configured LSP workspace roots. A root that contains a
 Nomo workspace indexes every workspace member; otherwise the nearest project is

@@ -83,6 +83,7 @@ const STD_IMPORTS: &[&str] = &[
     "std.hash.string",
     "std.hash.write_string",
     "std.crypto",
+    "std.crypto.random_bytes",
     "std.crypto.sha256",
     "std.crypto.sha512",
     "std.regex",
@@ -1865,6 +1866,11 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.hash.HashState"));
         assert!(items.iter().any(|item| item.label == "std.hash.string"));
         assert!(items.iter().any(|item| item.label == "std.crypto"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.crypto.random_bytes")
+        );
         assert!(items.iter().any(|item| item.label == "std.crypto.sha256"));
         assert!(items.iter().any(|item| item.label == "std.regex"));
         assert!(items.iter().any(|item| item.label == "std.regex.Regex"));

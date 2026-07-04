@@ -85,6 +85,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.crypto",
     "std.crypto.sha256",
     "std.crypto.sha512",
+    "std.json",
+    "std.json.JsonError",
+    "std.json.JsonValue",
+    "std.json.parse",
+    "std.json.stringify",
     "std.collections",
     "std.collections.StringMap",
     "std.collections.StringSet",
@@ -1849,6 +1854,10 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.hash.string"));
         assert!(items.iter().any(|item| item.label == "std.crypto"));
         assert!(items.iter().any(|item| item.label == "std.crypto.sha256"));
+        assert!(items.iter().any(|item| item.label == "std.json"));
+        assert!(items.iter().any(|item| item.label == "std.json.JsonValue"));
+        assert!(items.iter().any(|item| item.label == "std.json.parse"));
+        assert!(items.iter().any(|item| item.label == "std.json.stringify"));
         assert!(items.iter().any(|item| item.label == "std.log"));
         assert!(items.iter().any(|item| item.label == "std.log.enabled"));
         assert!(items.iter().any(|item| item.label == "std.log.info"));

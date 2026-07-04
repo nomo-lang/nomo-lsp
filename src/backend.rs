@@ -1758,7 +1758,7 @@ fn code_actions_for_text(
     module_source_overrides: &[(PathBuf, String)],
     diagnostics: &[tower_lsp::lsp_types::Diagnostic],
 ) -> Option<CodeActionResponse> {
-    let diagnostic = compiler_diagnostic_for_text(path, text, module_source_overrides).err()?;
+    let diagnostic = first_diagnostic_for_text(path, text, module_source_overrides)?;
     let lsp_diagnostic = diagnostics
         .iter()
         .find(|item| {
@@ -1803,7 +1803,61 @@ fn code_actions_for_text(
         &diagnostic,
         &lsp_diagnostic,
     ));
+    actions.extend(module_package_code_actions(
+        path,
+        text,
+        &uri,
+        module_source_overrides,
+        &diagnostic,
+        &lsp_diagnostic,
+    ));
     Some(actions)
+}
+
+fn module_package_code_actions(
+    path: &Path,
+    text: &str,
+    uri: &Url,
+    module_source_overrides: &[(PathBuf, String)],
+    diagnostic: &NomoDiagnostic,
+    lsp_diagnostic: &tower_lsp::lsp_types::Diagnostic,
+) -> Vec<CodeActionOrCommand> {
+    if diagnostic.code != "E0904"
+        || normalize_path(Path::new(&diagnostic.file)) != normalize_path(path)
+    {
+        return Vec::new();
+    }
+    let Some(package) = package_declaration(text) else {
+        return Vec::new();
+    };
+    let Some(expected) = expected_package_for_current_file(path, text, module_source_overrides)
+    else {
+        return Vec::new();
+    };
+    if package.name == expected {
+        return Vec::new();
+    }
+
+    vec![CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("update package declaration to match module `{expected}`"),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![lsp_diagnostic.clone()]),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(
+                uri.clone(),
+                vec![TextEdit {
+                    range: package.range,
+                    new_text: expected,
+                }],
+            )])),
+            document_changes: None,
+            change_annotations: None,
+        }),
+        command: None,
+        is_preferred: Some(true),
+        disabled: None,
+        data: None,
+    })]
 }
 
 fn add_import_code_actions(
@@ -2017,15 +2071,123 @@ fn full_document_range(text: &str) -> Range {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PackageDeclaration {
+    name: String,
+    line: usize,
+    column: usize,
+    length: usize,
+    line_text: String,
+    range: Range,
+}
+
+fn package_declaration(text: &str) -> Option<PackageDeclaration> {
+    for (line_index, source_line) in text.lines().enumerate() {
+        let trimmed_start = source_line.len() - source_line.trim_start().len();
+        let rest = source_line[trimmed_start..].strip_prefix("package ")?;
+        let name_start = trimmed_start + "package ".len();
+        let name = rest
+            .split_whitespace()
+            .next()
+            .filter(|name| !name.is_empty())?;
+        let name_end = name_start + name.len();
+        let character_start = source_line[..name_start]
+            .chars()
+            .map(char::len_utf16)
+            .sum::<usize>();
+        let character_end = source_line[..name_end]
+            .chars()
+            .map(char::len_utf16)
+            .sum::<usize>();
+        return Some(PackageDeclaration {
+            name: name.to_string(),
+            line: line_index + 1,
+            column: name_start + 1,
+            length: name.len(),
+            line_text: source_line.to_string(),
+            range: Range {
+                start: Position {
+                    line: line_index as u32,
+                    character: character_start as u32,
+                },
+                end: Position {
+                    line: line_index as u32,
+                    character: character_end as u32,
+                },
+            },
+        });
+    }
+    None
+}
+
+fn expected_package_for_current_file(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+) -> Option<String> {
+    let project = nomo::project::discover_project(path).ok()?;
+    let context = nomo::project::project_module_context(&project).ok()?;
+    let source_root = normalize_path(&context.local_source_root);
+    let normalized_path = normalize_path(path);
+    if !normalized_path.starts_with(&source_root) {
+        return None;
+    }
+    let local_root = project_main_import_root(&project, module_source_overrides)
+        .or_else(|| local_import_root(text))?;
+    module_import_from_file(&source_root, &local_root, &normalized_path)
+}
+
+fn project_main_import_root(
+    project: &nomo::project::Project,
+    module_source_overrides: &[(PathBuf, String)],
+) -> Option<String> {
+    let main = normalize_path(&project.main);
+    let main_source = module_source_overrides
+        .iter()
+        .find(|(path, _)| normalize_path(path) == main)
+        .map(|(_, source)| source.clone())
+        .or_else(|| std::fs::read_to_string(&project.main).ok())?;
+    local_import_root(&main_source)
+}
+
 fn diagnostics_for_text(
     path: &Path,
     text: &str,
     module_source_overrides: &[(PathBuf, String)],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    match compiler_diagnostic_for_text(path, text, module_source_overrides) {
-        Ok(_) => Vec::new(),
-        Err(diag) => vec![to_lsp_diagnostic(&diag)],
+    first_diagnostic_for_text(path, text, module_source_overrides)
+        .map(|diag| vec![to_lsp_diagnostic(&diag)])
+        .unwrap_or_default()
+}
+
+fn first_diagnostic_for_text(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+) -> Option<NomoDiagnostic> {
+    module_package_mismatch_diagnostic(path, text, module_source_overrides)
+        .or_else(|| compiler_diagnostic_for_text(path, text, module_source_overrides).err())
+}
+
+fn module_package_mismatch_diagnostic(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+) -> Option<NomoDiagnostic> {
+    let package = package_declaration(text)?;
+    let expected = expected_package_for_current_file(path, text, module_source_overrides)?;
+    if package.name == expected {
+        return None;
     }
+    Some(NomoDiagnostic::new(
+        "E0904",
+        format!("module `{}` declares package `{}`", expected, package.name),
+        path,
+        package.line,
+        package.column,
+        package.length,
+        package.line_text,
+    ))
 }
 
 fn compiler_diagnostic_for_text(
@@ -2864,6 +3026,98 @@ mod tests {
         let actions = code_actions_for_text(&main_path, text, uri, &[], &diagnostics).unwrap();
 
         assert!(actions.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_flag_module_package_mismatch_for_current_file() {
+        let root = temp_test_root("diagnostic-current-module-package-mismatch");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(project.join("src/main.nomo"), "package app.main\n").unwrap();
+        let module_path = project.join("src/math.nomo");
+        let text =
+            "package app.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+
+        let diagnostics = diagnostics_for_text(&module_path, text, &[]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("E0904".to_string()))
+        );
+        assert!(diagnostics[0].message.contains("app.math"));
+        assert!(diagnostics[0].message.contains("app.other"));
+        assert_eq!(
+            diagnostics[0].range,
+            Range {
+                start: Position {
+                    line: 0,
+                    character: 8,
+                },
+                end: Position {
+                    line: 0,
+                    character: 17,
+                },
+            }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn code_actions_update_package_for_module_file_mismatch() {
+        let root = temp_test_root("code-action-module-package-mismatch");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(project.join("src/main.nomo"), "package app.main\n").unwrap();
+        let module_path = project.join("src/math.nomo");
+        let text =
+            "package app.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+        let uri = Url::from_file_path(&module_path).unwrap();
+        let diagnostics = diagnostics_for_text(&module_path, text, &[]);
+
+        let actions =
+            code_actions_for_text(&module_path, text, uri.clone(), &[], &diagnostics).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(
+            action.title,
+            "update package declaration to match module `app.math`"
+        );
+        assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(
+            edits,
+            &vec![TextEdit {
+                range: Range {
+                    start: Position {
+                        line: 0,
+                        character: 8,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 17,
+                    },
+                },
+                new_text: "app.math".to_string(),
+            }]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

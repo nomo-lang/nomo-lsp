@@ -1317,6 +1317,9 @@ fn collect_inlay_hints_from_stmts(stmts: &[Stmt], range: &Range, hints: &mut Vec
             Stmt::Defer { stmt, .. } => {
                 collect_inlay_hints_from_stmts(std::slice::from_ref(stmt), range, hints);
             }
+            Stmt::Unsafe { body, .. } => {
+                collect_inlay_hints_from_stmts(body, range, hints);
+            }
             Stmt::Assign { .. }
             | Stmt::Postfix { .. }
             | Stmt::Return { .. }

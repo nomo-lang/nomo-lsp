@@ -108,8 +108,10 @@ const STD_IMPORTS: &[&str] = &[
     "std.path.normalize",
     "std.process",
     "std.process.ProcessError",
+    "std.process.ProcessOutput",
     "std.process.exec",
     "std.process.exit",
+    "std.process.output",
     "std.process.status",
     "std.result",
     "std.result.Result",
@@ -1807,7 +1809,13 @@ mod tests {
                 .iter()
                 .any(|item| item.label == "std.process.ProcessError")
         );
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.process.ProcessOutput")
+        );
         assert!(items.iter().any(|item| item.label == "std.process.exec"));
+        assert!(items.iter().any(|item| item.label == "std.process.output"));
         assert!(items.iter().any(|item| item.label == "std.process.status"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));

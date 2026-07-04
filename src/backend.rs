@@ -965,6 +965,8 @@ fn completion_kind(kind: SemanticSymbolKind) -> CompletionItemKind {
     match kind {
         SemanticSymbolKind::Struct => CompletionItemKind::STRUCT,
         SemanticSymbolKind::Enum => CompletionItemKind::ENUM,
+        SemanticSymbolKind::Field => CompletionItemKind::FIELD,
+        SemanticSymbolKind::Variant => CompletionItemKind::ENUM_MEMBER,
         SemanticSymbolKind::Const => CompletionItemKind::CONSTANT,
         SemanticSymbolKind::Function => CompletionItemKind::FUNCTION,
         SemanticSymbolKind::Method => CompletionItemKind::METHOD,
@@ -1198,6 +1200,8 @@ fn semantic_kind_label(kind: SemanticSymbolKind) -> &'static str {
     match kind {
         SemanticSymbolKind::Struct => "struct",
         SemanticSymbolKind::Enum => "enum",
+        SemanticSymbolKind::Field => "field",
+        SemanticSymbolKind::Variant => "enum variant",
         SemanticSymbolKind::Const => "const",
         SemanticSymbolKind::Function => "function",
         SemanticSymbolKind::Method => "method",
@@ -1208,6 +1212,8 @@ fn lsp_symbol_kind(kind: SemanticSymbolKind) -> SymbolKind {
     match kind {
         SemanticSymbolKind::Struct => SymbolKind::STRUCT,
         SemanticSymbolKind::Enum => SymbolKind::ENUM,
+        SemanticSymbolKind::Field => SymbolKind::FIELD,
+        SemanticSymbolKind::Variant => SymbolKind::ENUM_MEMBER,
         SemanticSymbolKind::Const => SymbolKind::CONSTANT,
         SemanticSymbolKind::Function => SymbolKind::FUNCTION,
         SemanticSymbolKind::Method => SymbolKind::METHOD,
@@ -2392,11 +2398,12 @@ mod tests {
             .iter()
             .map(|symbol| symbol.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["User", "MAX", "main", "email"]);
+        assert_eq!(names, vec!["User", "email", "MAX", "main", "email"]);
         assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
-        assert_eq!(symbols[1].kind, SymbolKind::CONSTANT);
-        assert_eq!(symbols[2].kind, SymbolKind::FUNCTION);
-        assert_eq!(symbols[3].kind, SymbolKind::METHOD);
+        assert_eq!(symbols[1].kind, SymbolKind::FIELD);
+        assert_eq!(symbols[2].kind, SymbolKind::CONSTANT);
+        assert_eq!(symbols[3].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[4].kind, SymbolKind::METHOD);
         assert_eq!(
             symbols[0].selection_range,
             Range {
@@ -2411,7 +2418,7 @@ mod tests {
             }
         );
         assert_eq!(
-            symbols[3].detail.as_deref(),
+            symbols[4].detail.as_deref(),
             Some("pub fn User.email(self: User) -> string")
         );
     }
@@ -2491,6 +2498,76 @@ mod tests {
                 end: Position {
                     line: 2,
                     character: 15,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn definition_returns_field_declaration_location() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 7,
+                character: 30,
+            },
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 3,
+                    character: 4,
+                },
+                end: Position {
+                    line: 3,
+                    character: 9,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn definition_returns_enum_variant_declaration_location() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nenum Status {\n    Ok\n    Err(string)\n}\n\nfn main() -> void {\n    let status: Status = Status.Err(\"bad\")\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 8,
+                character: 33,
+            },
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 4,
+                    character: 4,
+                },
+                end: Position {
+                    line: 4,
+                    character: 7,
                 },
             }
         );

@@ -160,6 +160,7 @@ const STD_IMPORTS: &[&str] = &[
     "std.process.exec",
     "std.process.exit",
     "std.process.output",
+    "std.process.spawn",
     "std.process.status",
     "std.result",
     "std.result.Result",
@@ -1900,6 +1901,7 @@ mod tests {
         );
         assert!(items.iter().any(|item| item.label == "std.process.exec"));
         assert!(items.iter().any(|item| item.label == "std.process.output"));
+        assert!(items.iter().any(|item| item.label == "std.process.spawn"));
         assert!(items.iter().any(|item| item.label == "std.process.status"));
         assert!(items.iter().any(|item| item.label == "std.testing"));
         assert!(items.iter().any(|item| item.label == "std.testing.assert"));

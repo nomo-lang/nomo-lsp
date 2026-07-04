@@ -63,6 +63,12 @@ const STD_IMPORTS: &[&str] = &[
     "std.debug.panic",
     "std.debug.print",
     "std.debug.println",
+    "std.log",
+    "std.log.debug",
+    "std.log.enabled",
+    "std.log.error",
+    "std.log.info",
+    "std.log.warn",
     "std.io",
     "std.io.IoError",
     "std.io.eprint",
@@ -1815,6 +1821,9 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.debug"));
         assert!(items.iter().any(|item| item.label == "std.debug.backtrace"));
         assert!(items.iter().any(|item| item.label == "std.debug.println"));
+        assert!(items.iter().any(|item| item.label == "std.log"));
+        assert!(items.iter().any(|item| item.label == "std.log.enabled"));
+        assert!(items.iter().any(|item| item.label == "std.log.info"));
         assert!(items.iter().any(|item| item.label == "std.process"));
         assert!(
             items

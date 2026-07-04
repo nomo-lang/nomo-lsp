@@ -330,7 +330,10 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 inlay_hint_provider: Some(OneOf::Left(true)),
@@ -541,6 +544,33 @@ impl LanguageServer for Backend {
             uri,
             params.text_document_position.position,
             &params.new_name,
+            &source_overrides,
+        ))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .map(|t| t.clone())
+            .or_else(|| std::fs::read_to_string(&path).ok())
+        else {
+            return Ok(None);
+        };
+
+        let source_overrides = self.document_overrides();
+        Ok(prepare_rename_for_document(
+            &path,
+            &text,
+            uri,
+            params.position,
             &source_overrides,
         ))
     }
@@ -1220,6 +1250,65 @@ fn rename_for_document(
         document_changes: None,
         change_annotations: None,
     })
+}
+
+fn prepare_rename_for_document(
+    path: &Path,
+    text: &str,
+    uri: Url,
+    position: Position,
+    source_overrides: &[(PathBuf, String)],
+) -> Option<PrepareRenameResponse> {
+    let locations = references_for_document(path, text, uri, position, true, source_overrides)?;
+    if locations.is_empty() {
+        return None;
+    }
+    let range = identifier_range_at_position(text, position)?;
+    Some(PrepareRenameResponse::Range(range))
+}
+
+fn identifier_range_at_position(text: &str, position: Position) -> Option<Range> {
+    let line = text.lines().nth(position.line as usize)?;
+    let byte_index = utf16_character_to_byte_index(line, position.character);
+    let bytes = line.as_bytes();
+    if byte_index > bytes.len() {
+        return None;
+    }
+
+    let mut start = byte_index;
+    if start == bytes.len() && start > 0 {
+        start -= 1;
+    }
+    if !is_ident_byte(bytes.get(start).copied()?) && start > 0 {
+        start -= 1;
+    }
+    if !is_ident_byte(bytes.get(start).copied()?) {
+        return None;
+    }
+
+    let mut end = start;
+    while start > 0 && is_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    while end + 1 < bytes.len() && is_ident_byte(bytes[end + 1]) {
+        end += 1;
+    }
+    let start_character = line[..start].encode_utf16().count() as u32;
+    let end_character = line[..=end].encode_utf16().count() as u32;
+    Some(Range {
+        start: Position {
+            line: position.line,
+            character: start_character,
+        },
+        end: Position {
+            line: position.line,
+            character: end_character,
+        },
+    })
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn is_nomo_identifier(name: &str) -> bool {
@@ -2838,6 +2927,108 @@ mod tests {
         );
 
         assert!(edit.is_none());
+    }
+
+    #[test]
+    fn prepare_rename_returns_current_identifier_range() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+
+        let prepared = prepare_rename_for_document(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 7,
+                character: 22,
+            },
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared,
+            PrepareRenameResponse::Range(Range {
+                start: Position {
+                    line: 7,
+                    character: 21,
+                },
+                end: Position {
+                    line: 7,
+                    character: 24,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn prepare_rename_uses_project_symbols() {
+        let root = temp_test_root("prepare-rename-project");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let prepared = prepare_rename_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared,
+            PrepareRenameResponse::Range(Range {
+                start: Position {
+                    line: 5,
+                    character: 21,
+                },
+                end: Position {
+                    line: 5,
+                    character: 24,
+                },
+            })
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn prepare_rename_returns_none_for_unknown_identifier() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+
+        let prepared = prepare_rename_for_document(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 3,
+                character: 8,
+            },
+            &[],
+        );
+
+        assert!(prepared.is_none());
     }
 
     #[test]

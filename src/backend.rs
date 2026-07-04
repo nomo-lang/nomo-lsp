@@ -103,8 +103,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.net.NetError",
     "std.net.TcpListener",
     "std.net.TcpStream",
+    "std.net.UdpDatagram",
+    "std.net.UdpSocket",
     "std.net.connect",
     "std.net.listen",
+    "std.net.udp_bind",
     "std.collections",
     "std.collections.StringMap",
     "std.collections.StringSet",
@@ -1895,8 +1898,11 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.net.NetError"));
         assert!(items.iter().any(|item| item.label == "std.net.TcpListener"));
         assert!(items.iter().any(|item| item.label == "std.net.TcpStream"));
+        assert!(items.iter().any(|item| item.label == "std.net.UdpDatagram"));
+        assert!(items.iter().any(|item| item.label == "std.net.UdpSocket"));
         assert!(items.iter().any(|item| item.label == "std.net.connect"));
         assert!(items.iter().any(|item| item.label == "std.net.listen"));
+        assert!(items.iter().any(|item| item.label == "std.net.udp_bind"));
         assert!(items.iter().any(|item| item.label == "std.log"));
         assert!(items.iter().any(|item| item.label == "std.log.enabled"));
         assert!(items.iter().any(|item| item.label == "std.log.info"));

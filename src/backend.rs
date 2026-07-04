@@ -1107,21 +1107,85 @@ fn hover_for_symbol(item: &SemanticSymbol) -> Option<Hover> {
 #[allow(deprecated)]
 fn document_symbols_for_text(path: &Path, text: &str) -> Option<DocumentSymbolResponse> {
     let symbols = compiler_semantic::symbols_for_text(path, text).ok()?;
-    let items = symbols
-        .into_iter()
-        .map(|item| DocumentSymbol {
-            name: item.name,
-            detail: Some(item.signature),
-            kind: lsp_symbol_kind(item.kind),
-            tags: None,
-            deprecated: None,
-            range: to_lsp_range(item.range),
-            selection_range: to_lsp_range(item.selection_range),
-            children: None,
-        })
-        .collect::<Vec<_>>();
+    let mut items = Vec::<DocumentSymbol>::new();
+    for symbol in symbols {
+        match symbol.kind {
+            SemanticSymbolKind::Field => {
+                let Some(owner) = field_owner_name(&symbol.signature).map(str::to_string) else {
+                    items.push(document_symbol(symbol));
+                    continue;
+                };
+                if let Err(symbol) =
+                    push_child_symbol(&mut items, &owner, SymbolKind::STRUCT, symbol)
+                {
+                    items.push(document_symbol(symbol));
+                }
+            }
+            SemanticSymbolKind::Variant => {
+                let Some(owner) = variant_owner_name(&symbol.signature).map(str::to_string) else {
+                    items.push(document_symbol(symbol));
+                    continue;
+                };
+                if let Err(symbol) = push_child_symbol(&mut items, &owner, SymbolKind::ENUM, symbol)
+                {
+                    items.push(document_symbol(symbol));
+                }
+            }
+            _ => items.push(document_symbol(symbol)),
+        }
+    }
 
     Some(DocumentSymbolResponse::Nested(items))
+}
+
+#[allow(deprecated)]
+fn document_symbol(item: SemanticSymbol) -> DocumentSymbol {
+    DocumentSymbol {
+        name: item.name,
+        detail: Some(item.signature),
+        kind: lsp_symbol_kind(item.kind),
+        tags: None,
+        deprecated: None,
+        range: to_lsp_range(item.range),
+        selection_range: to_lsp_range(item.selection_range),
+        children: None,
+    }
+}
+
+#[allow(deprecated)]
+fn push_child_symbol(
+    items: &mut [DocumentSymbol],
+    owner: &str,
+    owner_kind: SymbolKind,
+    child: SemanticSymbol,
+) -> std::result::Result<(), SemanticSymbol> {
+    let Some(parent) = items
+        .iter_mut()
+        .find(|item| item.name == owner && item.kind == owner_kind)
+    else {
+        return Err(child);
+    };
+    parent
+        .children
+        .get_or_insert_with(Vec::new)
+        .push(document_symbol(child));
+    Ok(())
+}
+
+fn field_owner_name(signature: &str) -> Option<&str> {
+    let rest = signature
+        .strip_prefix("pub field ")
+        .or_else(|| signature.strip_prefix("field "))?;
+    let (path, _) = rest.split_once(':')?;
+    let (owner, _) = path.rsplit_once('.')?;
+    Some(owner)
+}
+
+fn variant_owner_name(signature: &str) -> Option<&str> {
+    let rest = signature.strip_prefix("variant ")?;
+    let path = rest.split('(').next().unwrap_or(rest);
+    let (owner, _) = path.rsplit_once('.')?;
+    Some(owner)
 }
 
 fn definition_for_text(
@@ -3245,9 +3309,9 @@ mod tests {
     }
 
     #[test]
-    fn document_symbols_return_top_level_declarations_and_methods() {
+    fn document_symbols_nest_fields_and_variants_under_parent_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nconst MAX: i64 = 10\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\nconst MAX: i64 = 10\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
 
         let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
         else {
@@ -3258,12 +3322,25 @@ mod tests {
             .iter()
             .map(|symbol| symbol.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["User", "email", "MAX", "main", "email"]);
+        assert_eq!(names, vec!["User", "Status", "MAX", "main", "email"]);
         assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
-        assert_eq!(symbols[1].kind, SymbolKind::FIELD);
+        assert_eq!(symbols[1].kind, SymbolKind::ENUM);
         assert_eq!(symbols[2].kind, SymbolKind::CONSTANT);
         assert_eq!(symbols[3].kind, SymbolKind::FUNCTION);
         assert_eq!(symbols[4].kind, SymbolKind::METHOD);
+        let user_children = symbols[0].children.as_ref().expect("struct children");
+        assert_eq!(user_children.len(), 1);
+        assert_eq!(user_children[0].name, "email");
+        assert_eq!(user_children[0].kind, SymbolKind::FIELD);
+        let status_children = symbols[1].children.as_ref().expect("enum children");
+        assert_eq!(
+            status_children
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Ready", "Done"]
+        );
+        assert_eq!(status_children[0].kind, SymbolKind::ENUM_MEMBER);
         assert_eq!(
             symbols[0].selection_range,
             Range {

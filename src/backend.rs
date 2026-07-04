@@ -182,8 +182,14 @@ const STD_IMPORTS: &[&str] = &[
     "std.testing.assert_equal",
     "std.testing.assert_error",
     "std.time",
+    "std.time.Duration",
+    "std.time.duration_as_millis",
+    "std.time.duration_millis",
+    "std.time.duration_seconds",
+    "std.time.format_duration",
     "std.time.monotonic_millis",
     "std.time.now_millis",
+    "std.time.sleep",
     "std.time.sleep_millis",
 ];
 
@@ -1897,6 +1903,18 @@ mod tests {
                 .iter()
                 .any(|item| item.label == "std.testing.assert_error")
         );
+        assert!(items.iter().any(|item| item.label == "std.time.Duration"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.time.duration_millis")
+        );
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.time.format_duration")
+        );
+        assert!(items.iter().any(|item| item.label == "std.time.sleep"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));
         fs::remove_dir_all(&root).unwrap();

@@ -24,10 +24,14 @@ const KEYWORDS: &[&str] = &[
 const STD_IMPORTS: &[&str] = &[
     "std.array",
     "std.array.Array",
+    "std.array.clear",
     "std.array.get",
+    "std.array.insert",
     "std.array.len",
     "std.array.new",
+    "std.array.pop",
     "std.array.push",
+    "std.array.remove",
     "std.array.set",
     "std.char",
     "std.char.is_alpha",
@@ -1779,6 +1783,8 @@ mod tests {
 
         assert!(items.iter().any(|item| item.label == "std.io"));
         assert!(items.iter().any(|item| item.label == "std.io.println"));
+        assert!(items.iter().any(|item| item.label == "std.array.clear"));
+        assert!(items.iter().any(|item| item.label == "std.array.remove"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));
         fs::remove_dir_all(&root).unwrap();

@@ -76,6 +76,12 @@ const STD_IMPORTS: &[&str] = &[
     "std.io.print",
     "std.io.println",
     "std.io.read_line",
+    "std.hash",
+    "std.hash.HashState",
+    "std.hash.finish",
+    "std.hash.new",
+    "std.hash.string",
+    "std.hash.write_string",
     "std.math",
     "std.math.abs",
     "std.math.ceil",
@@ -1821,6 +1827,9 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.debug"));
         assert!(items.iter().any(|item| item.label == "std.debug.backtrace"));
         assert!(items.iter().any(|item| item.label == "std.debug.println"));
+        assert!(items.iter().any(|item| item.label == "std.hash"));
+        assert!(items.iter().any(|item| item.label == "std.hash.HashState"));
+        assert!(items.iter().any(|item| item.label == "std.hash.string"));
         assert!(items.iter().any(|item| item.label == "std.log"));
         assert!(items.iter().any(|item| item.label == "std.log.enabled"));
         assert!(items.iter().any(|item| item.label == "std.log.info"));

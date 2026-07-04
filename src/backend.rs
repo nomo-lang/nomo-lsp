@@ -244,6 +244,13 @@ const STD_IMPORTS: &[&str] = &[
     "std.time.sleep_millis",
 ];
 
+fn completion_options() -> CompletionOptions {
+    CompletionOptions {
+        trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
+        ..Default::default()
+    }
+}
+
 pub struct Backend {
     client: Client,
     /// In-memory contents of every open document, keyed by its URI.
@@ -328,10 +335,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                completion_provider: Some(CompletionOptions {
-                    trigger_characters: None,
-                    ..Default::default()
-                }),
+                completion_provider: Some(completion_options()),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
@@ -2094,6 +2098,16 @@ fn diagnostic_code_description(code: &str) -> Option<CodeDescription> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn completion_options_trigger_after_import_space_and_path_dot() {
+        let options = completion_options();
+
+        assert_eq!(
+            options.trigger_characters,
+            Some(vec![".".to_string(), " ".to_string()])
+        );
+    }
 
     #[test]
     fn diagnostics_accept_dependency_alias_imports_from_nearest_manifest() {

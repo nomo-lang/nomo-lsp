@@ -4079,6 +4079,116 @@ mod tests {
     }
 
     #[test]
+    fn definition_returns_dependency_symbol_location() {
+        let root = temp_test_root("symbol-definition-dependency");
+        reset_dir(&root);
+        let project = root.join("hello");
+        let dependency = root.join("local-utils");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::create_dir_all(dependency.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"local/utils\", path = \"../local-utils\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"local\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let dep_module = dependency.join("src/path.nomo");
+        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &dep_module,
+            "package local_utils.path\n\n/// Joins values.\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let definition = definition_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.uri,
+            Url::from_file_path(fs::canonicalize(&dep_module).unwrap()).unwrap()
+        );
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 3,
+                    character: 7,
+                },
+                end: Position {
+                    line: 3,
+                    character: 11,
+                },
+            }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn hover_uses_dependency_symbol_docs() {
+        let root = temp_test_root("semantic-hover-dependency");
+        reset_dir(&root);
+        let project = root.join("hello");
+        let dependency = root.join("local-utils");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::create_dir_all(dependency.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"local/utils\", path = \"../local-utils\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"local\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let dep_module = dependency.join("src/path.nomo");
+        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(1, 2)\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &dep_module,
+            "package local_utils.path\n\n/// Joins values.\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let hover = hover_for_document(
+            &main,
+            main_source,
+            Position {
+                line: 5,
+                character: 23,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("pub fn join(a: i64, b: i64) -> i64"));
+        assert!(markup.value.contains("Joins values."));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn hover_uses_cross_file_project_symbol_docs() {
         let root = temp_test_root("semantic-hover-project");
         reset_dir(&root);

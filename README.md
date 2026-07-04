@@ -80,10 +80,11 @@ declarations and methods from the current document or, inside a project, local
 `src/**/*.nomo` modules. Open editor buffers are used as overlays so unsaved
 module declarations can appear in completion.
 
-Hover indexes the open document plus local project `src/**/*.nomo` modules when
-a nearest `nomo.toml` is available, and shows the parsed signature plus any
-`///` or `/** */` item doc comment. Extern function declarations participate in
-the same hover path. Open editor buffers are used as overlays so unsaved module
+Hover indexes the open document, local project `src/**/*.nomo` modules, and
+public symbols from imported dependency modules with source available when a
+nearest `nomo.toml` is available. It shows the parsed signature plus any `///`
+or `/** */` item doc comment. Extern function declarations participate in the
+same hover path. Open editor buffers are used as overlays so unsaved module
 edits can participate in hover results.
 
 Document symbols use the same parsed declaration index to power editor outline
@@ -97,9 +98,10 @@ Nomo workspace indexes every workspace member; otherwise the nearest project is
 indexed. Results include current open-buffer overlays and are filtered by the
 client query.
 
-Go-to-definition resolves references to declarations in the same document or in
-local project modules under `src/**/*.nomo`. Dependency package and whole
-workspace definition lookup remain future semantic graph slices.
+Go-to-definition resolves references to declarations in the same document, local
+project modules under `src/**/*.nomo`, and public symbols from imported
+dependency modules with source available. Whole-workspace definition lookup
+remains a future semantic graph slice.
 
 Find references returns lexical identifier occurrences in the same document and
 local project modules for the selected declaration name. Precise shadowing-aware,

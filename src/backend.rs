@@ -132,6 +132,10 @@ const STD_IMPORTS: &[&str] = &[
     "std.string.to_lower",
     "std.string.to_upper",
     "std.string.trim",
+    "std.testing",
+    "std.testing.assert",
+    "std.testing.assert_equal",
+    "std.testing.assert_error",
     "std.time",
     "std.time.monotonic_millis",
     "std.time.now_millis",
@@ -1817,6 +1821,18 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.process.exec"));
         assert!(items.iter().any(|item| item.label == "std.process.output"));
         assert!(items.iter().any(|item| item.label == "std.process.status"));
+        assert!(items.iter().any(|item| item.label == "std.testing"));
+        assert!(items.iter().any(|item| item.label == "std.testing.assert"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.testing.assert_equal")
+        );
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.testing.assert_error")
+        );
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));
         fs::remove_dir_all(&root).unwrap();

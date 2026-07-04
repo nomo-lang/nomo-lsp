@@ -16,9 +16,33 @@ use crate::semantic;
 /// language whitepaper, including words reserved for upcoming versions so the
 /// editor experience stays stable as the compiler grows.
 const KEYWORDS: &[&str] = &[
-    "package", "import", "pub", "fn", "struct", "enum", "impl", "let", "mut", "const", "if",
-    "else", "match", "for", "in", "return", "defer", "break", "continue", "panic", "as", "true",
-    "false", "void",
+    "package",
+    "import",
+    "pub",
+    "fn",
+    "struct",
+    "enum",
+    "interface",
+    "impl",
+    "extern",
+    "unsafe",
+    "let",
+    "mut",
+    "const",
+    "if",
+    "else",
+    "match",
+    "for",
+    "in",
+    "return",
+    "defer",
+    "break",
+    "continue",
+    "panic",
+    "as",
+    "true",
+    "false",
+    "void",
 ];
 
 const STD_IMPORTS: &[&str] = &[

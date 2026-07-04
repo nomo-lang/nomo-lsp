@@ -77,6 +77,9 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         TokenKind::Import => keyword("import"),
         TokenKind::Pub => keyword("pub"),
         TokenKind::Impl => keyword("impl"),
+        TokenKind::Interface => keyword("interface"),
+        TokenKind::Unsafe => keyword("unsafe"),
+        TokenKind::Extern => keyword("extern"),
         TokenKind::Fn => keyword("fn"),
         TokenKind::Struct => keyword("struct"),
         TokenKind::Enum => keyword("enum"),
@@ -134,6 +137,9 @@ mod tests {
     fn classifies_current_v0_1_keywords_and_operators() {
         for (kind, text) in [
             (TokenKind::Impl, "impl"),
+            (TokenKind::Interface, "interface"),
+            (TokenKind::Unsafe, "unsafe"),
+            (TokenKind::Extern, "extern"),
             (TokenKind::Const, "const"),
             (TokenKind::For, "for"),
             (TokenKind::In, "in"),

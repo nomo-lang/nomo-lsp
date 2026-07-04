@@ -100,10 +100,17 @@ const STD_IMPORTS: &[&str] = &[
     "std.json.parse",
     "std.json.stringify",
     "std.http",
+    "std.http.HttpExchange",
     "std.http.HttpError",
     "std.http.HttpResponse",
+    "std.http.HttpServer",
+    "std.http.accept",
+    "std.http.close_exchange",
+    "std.http.close_server",
     "std.http.get",
+    "std.http.listen",
     "std.http.post",
+    "std.http.respond_string",
     "std.net",
     "std.net.NetError",
     "std.net.TcpListener",
@@ -1900,14 +1907,37 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.json.parse"));
         assert!(items.iter().any(|item| item.label == "std.json.stringify"));
         assert!(items.iter().any(|item| item.label == "std.http"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.http.HttpExchange")
+        );
         assert!(items.iter().any(|item| item.label == "std.http.HttpError"));
         assert!(
             items
                 .iter()
                 .any(|item| item.label == "std.http.HttpResponse")
         );
+        assert!(items.iter().any(|item| item.label == "std.http.HttpServer"));
+        assert!(items.iter().any(|item| item.label == "std.http.accept"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.http.close_exchange")
+        );
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.http.close_server")
+        );
         assert!(items.iter().any(|item| item.label == "std.http.get"));
+        assert!(items.iter().any(|item| item.label == "std.http.listen"));
         assert!(items.iter().any(|item| item.label == "std.http.post"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.http.respond_string")
+        );
         assert!(items.iter().any(|item| item.label == "std.net"));
         assert!(items.iter().any(|item| item.label == "std.net.NetError"));
         assert!(items.iter().any(|item| item.label == "std.net.TcpListener"));

@@ -58,6 +58,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.fs.read_dir",
     "std.fs.remove_dir",
     "std.fs.write_string",
+    "std.debug",
+    "std.debug.backtrace",
+    "std.debug.panic",
+    "std.debug.print",
+    "std.debug.println",
     "std.io",
     "std.io.IoError",
     "std.io.eprint",
@@ -1807,6 +1812,9 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.fs.FileMetadata"));
         assert!(items.iter().any(|item| item.label == "std.fs.metadata"));
         assert!(items.iter().any(|item| item.label == "std.fs.read_dir"));
+        assert!(items.iter().any(|item| item.label == "std.debug"));
+        assert!(items.iter().any(|item| item.label == "std.debug.backtrace"));
+        assert!(items.iter().any(|item| item.label == "std.debug.println"));
         assert!(items.iter().any(|item| item.label == "std.process"));
         assert!(
             items

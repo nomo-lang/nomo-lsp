@@ -82,6 +82,9 @@ const STD_IMPORTS: &[&str] = &[
     "std.hash.new",
     "std.hash.string",
     "std.hash.write_string",
+    "std.crypto",
+    "std.crypto.sha256",
+    "std.crypto.sha512",
     "std.math",
     "std.math.abs",
     "std.math.ceil",
@@ -1830,6 +1833,8 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.hash"));
         assert!(items.iter().any(|item| item.label == "std.hash.HashState"));
         assert!(items.iter().any(|item| item.label == "std.hash.string"));
+        assert!(items.iter().any(|item| item.label == "std.crypto"));
+        assert!(items.iter().any(|item| item.label == "std.crypto.sha256"));
         assert!(items.iter().any(|item| item.label == "std.log"));
         assert!(items.iter().any(|item| item.label == "std.log.enabled"));
         assert!(items.iter().any(|item| item.label == "std.log.info"));

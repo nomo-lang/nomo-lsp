@@ -2,7 +2,9 @@ use std::cmp::Ordering;
 use std::path::Path;
 
 use nomo::{Token, TokenKind, lex};
-use tower_lsp::lsp_types::{Position, Range, SemanticToken, SemanticTokenType};
+use tower_lsp::lsp_types::{
+    Position, Range, SemanticToken, SemanticTokenModifier, SemanticTokenType,
+};
 
 // Indices into the legend below. Keep these in sync with `token_types`.
 const KEYWORD: u32 = 0;
@@ -15,6 +17,9 @@ const FUNCTION: u32 = 6;
 const PROPERTY: u32 = 7;
 const ENUM_MEMBER: u32 = 8;
 
+const PUBLIC: u32 = 1 << 0;
+const MUTABLE: u32 = 1 << 1;
+
 pub fn token_types() -> Vec<SemanticTokenType> {
     vec![
         SemanticTokenType::KEYWORD,
@@ -26,6 +31,13 @@ pub fn token_types() -> Vec<SemanticTokenType> {
         SemanticTokenType::FUNCTION,
         SemanticTokenType::PROPERTY,
         SemanticTokenType::ENUM_MEMBER,
+    ]
+}
+
+pub fn token_modifiers() -> Vec<SemanticTokenModifier> {
+    vec![
+        SemanticTokenModifier::new("public"),
+        SemanticTokenModifier::new("mutable"),
     ]
 }
 
@@ -51,7 +63,7 @@ fn tokens_for_range(path: &Path, source: &str, range: Option<Range>) -> Vec<Sema
     let mut context = SemanticContext::default();
     for index in 0..raw.len() {
         let token = &raw[index];
-        let Some((token_type, length)) = context.classify(&raw, index) else {
+        let Some((token_type, length, modifiers)) = context.classify(&raw, index) else {
             continue;
         };
         if length == 0 {
@@ -81,7 +93,7 @@ fn tokens_for_range(path: &Path, source: &str, range: Option<Range>) -> Vec<Sema
             delta_start,
             length,
             token_type,
-            token_modifiers_bitset: 0,
+            token_modifiers_bitset: modifiers,
         });
 
         prev_line = line;
@@ -128,7 +140,7 @@ enum DeclarationScopeKind {
 }
 
 impl SemanticContext {
-    fn classify(&mut self, tokens: &[Token], index: usize) -> Option<(u32, u32)> {
+    fn classify(&mut self, tokens: &[Token], index: usize) -> Option<(u32, u32, u32)> {
         self.update_declaration_scopes(tokens, index);
 
         let token = &tokens[index];
@@ -141,7 +153,12 @@ impl SemanticContext {
         kind
     }
 
-    fn classify_ident(&self, tokens: &[Token], index: usize, name: &str) -> Option<(u32, u32)> {
+    fn classify_ident(
+        &self,
+        tokens: &[Token],
+        index: usize,
+        name: &str,
+    ) -> Option<(u32, u32, u32)> {
         let len = name.chars().count() as u32;
         let previous = previous_significant(tokens, index);
         let next_raw = tokens.get(index + 1);
@@ -149,7 +166,7 @@ impl SemanticContext {
         let starts_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
 
         if previous.is_some_and(|token| matches!(&token.kind, TokenKind::Fn)) {
-            return Some((FUNCTION, len));
+            return Some((FUNCTION, len, 0));
         }
         if self.in_declaration(DeclarationScopeKind::Enum)
             && matches!(
@@ -157,32 +174,32 @@ impl SemanticContext {
                 Some(TokenKind::LParen | TokenKind::Newline | TokenKind::RBrace)
             )
         {
-            return Some((ENUM_MEMBER, len));
+            return Some((ENUM_MEMBER, len, 0));
         }
         if previous.is_some_and(|token| matches!(&token.kind, TokenKind::Dot)) && starts_upper {
-            return Some((ENUM_MEMBER, len));
+            return Some((ENUM_MEMBER, len, 0));
         }
         if next.is_some_and(|token| matches!(&token.kind, TokenKind::LParen)) {
-            return Some((FUNCTION, len));
+            return Some((FUNCTION, len, 0));
         }
         if previous.is_some_and(|token| matches!(&token.kind, TokenKind::Dot)) {
-            return Some((PROPERTY, len));
+            return Some((PROPERTY, len, 0));
         }
         if self.in_declaration(DeclarationScopeKind::Struct)
             && next.is_some_and(|token| matches!(&token.kind, TokenKind::Colon))
         {
-            return Some((PROPERTY, len));
+            return Some((PROPERTY, len, 0));
         }
         if next.is_some_and(|token| matches!(&token.kind, TokenKind::Colon))
             && struct_literal_field_context(tokens, index)
         {
-            return Some((PROPERTY, len));
+            return Some((PROPERTY, len, 0));
         }
 
         if starts_upper {
-            Some((TYPE, len))
+            Some((TYPE, len, 0))
         } else {
-            Some((VARIABLE, len))
+            Some((VARIABLE, len, 0))
         }
     }
 
@@ -278,13 +295,13 @@ impl SemanticContext {
 
 /// Map a token kind to its semantic token type and on-screen length. Returns
 /// `None` for trivia and punctuation that should not be highlighted.
-fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
-    let keyword = |text: &str| Some((KEYWORD, text.chars().count() as u32));
+fn classify(kind: &TokenKind) -> Option<(u32, u32, u32)> {
+    let keyword = |text: &str| Some((KEYWORD, text.chars().count() as u32, 0));
 
     match kind {
         TokenKind::Package => keyword("package"),
         TokenKind::Import => keyword("import"),
-        TokenKind::Pub => keyword("pub"),
+        TokenKind::Pub => Some((KEYWORD, "pub".chars().count() as u32, PUBLIC)),
         TokenKind::Impl => keyword("impl"),
         TokenKind::Interface => keyword("interface"),
         TokenKind::Unsafe => keyword("unsafe"),
@@ -299,7 +316,7 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         TokenKind::Panic => keyword("panic"),
         TokenKind::As => keyword("as"),
         TokenKind::Let => keyword("let"),
-        TokenKind::Mut => keyword("mut"),
+        TokenKind::Mut => Some((KEYWORD, "mut".chars().count() as u32, MUTABLE)),
         TokenKind::Return => keyword("return"),
         TokenKind::For => keyword("for"),
         TokenKind::In => keyword("in"),
@@ -314,15 +331,15 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
             // Treat capitalized identifiers as types (structs, enums, generics).
             let starts_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
             if starts_upper {
-                Some((TYPE, len))
+                Some((TYPE, len, 0))
             } else {
-                Some((VARIABLE, len))
+                Some((VARIABLE, len, 0))
             }
         }
-        TokenKind::String(value) => Some((STRING, value.chars().count() as u32 + 2)),
-        TokenKind::Char(_) => Some((STRING, 3)),
-        TokenKind::Int(value) => Some((NUMBER, value.to_string().chars().count() as u32)),
-        TokenKind::Float(value) => Some((NUMBER, value.chars().count() as u32)),
+        TokenKind::String(value) => Some((STRING, value.chars().count() as u32 + 2, 0)),
+        TokenKind::Char(_) => Some((STRING, 3, 0)),
+        TokenKind::Int(value) => Some((NUMBER, value.to_string().chars().count() as u32, 0)),
+        TokenKind::Float(value) => Some((NUMBER, value.chars().count() as u32, 0)),
         TokenKind::Plus
         | TokenKind::Equal
         | TokenKind::EqualEqual
@@ -330,9 +347,9 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32)> {
         | TokenKind::Star
         | TokenKind::Less
         | TokenKind::Greater
-        | TokenKind::Question => Some((OPERATOR, 1)),
+        | TokenKind::Question => Some((OPERATOR, 1, 0)),
         TokenKind::LessEqual | TokenKind::GreaterEqual | TokenKind::Arrow | TokenKind::FatArrow => {
-            Some((OPERATOR, 2))
+            Some((OPERATOR, 2, 0))
         }
         _ => None,
     }
@@ -401,10 +418,19 @@ mod tests {
             (TokenKind::Continue, "continue"),
             (TokenKind::Defer, "defer"),
         ] {
-            assert_eq!(classify(&kind), Some((KEYWORD, text.len() as u32)));
+            assert_eq!(classify(&kind), Some((KEYWORD, text.len() as u32, 0)));
         }
 
-        assert_eq!(classify(&TokenKind::Star), Some((OPERATOR, 1)));
+        assert_eq!(classify(&TokenKind::Star), Some((OPERATOR, 1, 0)));
+        assert_eq!(classify(&TokenKind::Pub), Some((KEYWORD, 3, PUBLIC)));
+        assert_eq!(classify(&TokenKind::Mut), Some((KEYWORD, 3, MUTABLE)));
+        assert_eq!(
+            token_modifiers(),
+            vec![
+                SemanticTokenModifier::new("public"),
+                SemanticTokenModifier::new("mutable")
+            ]
+        );
     }
 
     #[test]
@@ -417,7 +443,7 @@ mod tests {
             if let TokenKind::Ident(name) = &raw[index].kind {
                 let token_type = context
                     .classify(&raw, index)
-                    .map(|(token_type, _)| token_type);
+                    .map(|(token_type, _, _)| token_type);
                 classified.push((name.as_str(), raw[index].line, token_type));
             } else {
                 context.classify(&raw, index);
@@ -467,7 +493,24 @@ mod tests {
         assert_eq!(data[0].delta_line, 6);
     }
 
+    #[test]
+    fn emits_public_and_mutable_semantic_token_modifiers() {
+        let source = "package app.main\n\npub fn main() -> void {\n    let mut value: i64 = 1\n}\n";
+        let data = tokens(Path::new("main.nomo"), source);
+        let absolute = absolute_token_details(&data);
+
+        assert!(absolute.contains(&(2, 0, KEYWORD, PUBLIC)));
+        assert!(absolute.contains(&(3, 8, KEYWORD, MUTABLE)));
+    }
+
     fn absolute_tokens(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32)> {
+        absolute_token_details(tokens)
+            .into_iter()
+            .map(|(line, start, token_type, _)| (line, start, token_type))
+            .collect()
+    }
+
+    fn absolute_token_details(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32, u32)> {
         let mut line = 0u32;
         let mut start = 0u32;
         tokens
@@ -479,7 +522,7 @@ mod tests {
                 } else {
                     start = token.delta_start;
                 }
-                (line, start, token.token_type)
+                (line, start, token.token_type, token.token_modifiers_bitset)
             })
             .collect()
     }

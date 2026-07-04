@@ -354,7 +354,7 @@ impl LanguageServer for Backend {
                         SemanticTokensOptions {
                             legend: SemanticTokensLegend {
                                 token_types: semantic::token_types(),
-                                token_modifiers: vec![],
+                                token_modifiers: semantic::token_modifiers(),
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
                             range: Some(true),

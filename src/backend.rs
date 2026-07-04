@@ -103,6 +103,10 @@ const STD_IMPORTS: &[&str] = &[
     "std.string.to_lower",
     "std.string.to_upper",
     "std.string.trim",
+    "std.time",
+    "std.time.monotonic_millis",
+    "std.time.now_millis",
+    "std.time.sleep_millis",
 ];
 
 pub struct Backend {

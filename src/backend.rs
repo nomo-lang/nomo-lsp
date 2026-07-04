@@ -49,8 +49,12 @@ const STD_IMPORTS: &[&str] = &[
     "std.fs",
     "std.fs.File",
     "std.fs.FsError",
+    "std.fs.create_dir",
+    "std.fs.exists",
     "std.fs.open",
     "std.fs.read_to_string",
+    "std.fs.read_dir",
+    "std.fs.remove_dir",
     "std.fs.write_string",
     "std.io",
     "std.io.IoError",
@@ -1787,6 +1791,7 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.array.clear"));
         assert!(items.iter().any(|item| item.label == "std.array.iter"));
         assert!(items.iter().any(|item| item.label == "std.array.remove"));
+        assert!(items.iter().any(|item| item.label == "std.fs.read_dir"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));
         fs::remove_dir_all(&root).unwrap();

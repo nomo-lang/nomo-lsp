@@ -1635,6 +1635,29 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_accept_builtin_std_imports_without_dependency() {
+        let root = temp_test_root("builtin-std-imports");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let source = project.join("src/main.nomo");
+
+        let diagnostics = diagnostics_for_text(
+            &source,
+            "package app.main\n\nimport std.io\nimport std.path\n\nfn main() -> void {\n    io.println(path.basename(\"/tmp/demo.txt\"))\n}\n",
+            &[],
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn diagnostics_accept_local_project_module_imports() {
         let root = temp_test_root("local-module-imports");
         reset_dir(&root);

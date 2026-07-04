@@ -48,9 +48,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.env.temp_dir",
     "std.fs",
     "std.fs.File",
+    "std.fs.FileMetadata",
     "std.fs.FsError",
     "std.fs.create_dir",
     "std.fs.exists",
+    "std.fs.metadata",
     "std.fs.open",
     "std.fs.read_to_string",
     "std.fs.read_dir",
@@ -1791,6 +1793,8 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.array.clear"));
         assert!(items.iter().any(|item| item.label == "std.array.iter"));
         assert!(items.iter().any(|item| item.label == "std.array.remove"));
+        assert!(items.iter().any(|item| item.label == "std.fs.FileMetadata"));
+        assert!(items.iter().any(|item| item.label == "std.fs.metadata"));
         assert!(items.iter().any(|item| item.label == "std.fs.read_dir"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));

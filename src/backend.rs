@@ -2268,6 +2268,27 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_link_registered_ffi_docs() {
+        let path = PathBuf::from("main.nomo");
+        let text =
+            "package app.main\n\nextern \"system\" {\n    fn puts(message: string) -> i32\n}\n";
+        let diagnostics = diagnostics_for_text(&path, text, &[]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("E1511".to_string()))
+        );
+        assert_eq!(
+            diagnostics[0]
+                .code_description
+                .as_ref()
+                .map(|description| description.href.as_str()),
+            Some("https://github.com/nomo-lang/nomo/blob/main/docs/diagnostics/E1511.md")
+        );
+    }
+
+    #[test]
     fn hover_returns_function_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
         let text = "package app.main\n\n/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";

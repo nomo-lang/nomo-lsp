@@ -106,6 +106,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.path.is_absolute",
     "std.path.join",
     "std.path.normalize",
+    "std.process",
+    "std.process.ProcessError",
+    "std.process.exec",
+    "std.process.exit",
+    "std.process.status",
     "std.result",
     "std.result.Result",
     "std.result.and_then",
@@ -1796,6 +1801,14 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.fs.FileMetadata"));
         assert!(items.iter().any(|item| item.label == "std.fs.metadata"));
         assert!(items.iter().any(|item| item.label == "std.fs.read_dir"));
+        assert!(items.iter().any(|item| item.label == "std.process"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.process.ProcessError")
+        );
+        assert!(items.iter().any(|item| item.label == "std.process.exec"));
+        assert!(items.iter().any(|item| item.label == "std.process.status"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));
         fs::remove_dir_all(&root).unwrap();

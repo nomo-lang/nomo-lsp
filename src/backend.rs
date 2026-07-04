@@ -1050,6 +1050,7 @@ fn completion_kind(kind: SemanticSymbolKind) -> CompletionItemKind {
         SemanticSymbolKind::Variant => CompletionItemKind::ENUM_MEMBER,
         SemanticSymbolKind::Const => CompletionItemKind::CONSTANT,
         SemanticSymbolKind::Function => CompletionItemKind::FUNCTION,
+        SemanticSymbolKind::ExternFunction => CompletionItemKind::FUNCTION,
         SemanticSymbolKind::Method => CompletionItemKind::METHOD,
     }
 }
@@ -1466,6 +1467,7 @@ fn semantic_kind_label(kind: SemanticSymbolKind) -> &'static str {
         SemanticSymbolKind::Variant => "enum variant",
         SemanticSymbolKind::Const => "const",
         SemanticSymbolKind::Function => "function",
+        SemanticSymbolKind::ExternFunction => "extern function",
         SemanticSymbolKind::Method => "method",
     }
 }
@@ -1478,6 +1480,7 @@ fn lsp_symbol_kind(kind: SemanticSymbolKind) -> SymbolKind {
         SemanticSymbolKind::Variant => SymbolKind::ENUM_MEMBER,
         SemanticSymbolKind::Const => SymbolKind::CONSTANT,
         SemanticSymbolKind::Function => SymbolKind::FUNCTION,
+        SemanticSymbolKind::ExternFunction => SymbolKind::FUNCTION,
         SemanticSymbolKind::Method => SymbolKind::METHOD,
     }
 }
@@ -3292,6 +3295,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_returns_extern_function_signature_and_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nextern \"C\" {\n    /// Writes a C string.\n    fn puts(message: string) -> i32\n}\n\nfn main() -> void {\n    unsafe {\n        puts(\"hello\")\n    }\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 9,
+                character: 10,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(
+            markup
+                .value
+                .contains("extern \"C\" fn puts(message: string) -> i32")
+        );
+        assert!(markup.value.contains("Writes a C string."));
+        assert!(markup.value.contains("extern function"));
+    }
+
+    #[test]
     fn hover_returns_none_for_unknown_identifier() {
         let path = PathBuf::from("main.nomo");
         let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
@@ -3311,7 +3341,7 @@ mod tests {
     #[test]
     fn document_symbols_nest_fields_and_variants_under_parent_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\nconst MAX: i64 = 10\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
+        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\nconst MAX: i64 = 10\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
 
         let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
         else {
@@ -3322,12 +3352,16 @@ mod tests {
             .iter()
             .map(|symbol| symbol.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["User", "Status", "MAX", "main", "email"]);
+        assert_eq!(
+            names,
+            vec!["User", "Status", "MAX", "main", "puts", "email"]
+        );
         assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
         assert_eq!(symbols[1].kind, SymbolKind::ENUM);
         assert_eq!(symbols[2].kind, SymbolKind::CONSTANT);
         assert_eq!(symbols[3].kind, SymbolKind::FUNCTION);
-        assert_eq!(symbols[4].kind, SymbolKind::METHOD);
+        assert_eq!(symbols[4].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[5].kind, SymbolKind::METHOD);
         let user_children = symbols[0].children.as_ref().expect("struct children");
         assert_eq!(user_children.len(), 1);
         assert_eq!(user_children[0].name, "email");
@@ -3356,6 +3390,10 @@ mod tests {
         );
         assert_eq!(
             symbols[4].detail.as_deref(),
+            Some("extern \"C\" fn puts(message: string) -> i32")
+        );
+        assert_eq!(
+            symbols[5].detail.as_deref(),
             Some("pub fn User.email(self: User) -> string")
         );
     }

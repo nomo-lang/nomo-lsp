@@ -99,6 +99,11 @@ const STD_IMPORTS: &[&str] = &[
     "std.json.JsonValue",
     "std.json.parse",
     "std.json.stringify",
+    "std.http",
+    "std.http.HttpError",
+    "std.http.HttpResponse",
+    "std.http.get",
+    "std.http.post",
     "std.net",
     "std.net.NetError",
     "std.net.TcpListener",
@@ -1894,6 +1899,15 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.json.JsonValue"));
         assert!(items.iter().any(|item| item.label == "std.json.parse"));
         assert!(items.iter().any(|item| item.label == "std.json.stringify"));
+        assert!(items.iter().any(|item| item.label == "std.http"));
+        assert!(items.iter().any(|item| item.label == "std.http.HttpError"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.label == "std.http.HttpResponse")
+        );
+        assert!(items.iter().any(|item| item.label == "std.http.get"));
+        assert!(items.iter().any(|item| item.label == "std.http.post"));
         assert!(items.iter().any(|item| item.label == "std.net"));
         assert!(items.iter().any(|item| item.label == "std.net.NetError"));
         assert!(items.iter().any(|item| item.label == "std.net.TcpListener"));

@@ -1730,25 +1730,29 @@ fn add_import_code_actions(
     let Some(local_root) = local_import_root(text) else {
         return Vec::new();
     };
-    let source_root = project.root.join("src");
     let current_imports = imported_paths(text);
-    let Ok(symbols) = compiler_semantic::symbols_for_project_with_overrides(
-        &project,
-        &overrides_with_current(path, text, module_source_overrides),
-    ) else {
+    let Ok(context) = nomo::project::project_module_context(&project) else {
         return Vec::new();
     };
+    let source_roots = std::iter::once((local_root.as_str(), context.local_source_root.as_path()))
+        .chain(
+            context
+                .external_modules
+                .iter()
+                .map(|module| (module.import_root.as_str(), module.source_root.as_path())),
+        )
+        .collect::<Vec<_>>();
+    let overrides = overrides_with_current(path, text, module_source_overrides);
 
-    let mut imports = symbols
+    let mut imports = source_roots
         .into_iter()
-        .filter(|symbol| symbol.name == symbol_name)
-        .filter(|symbol| symbol.source_path != path)
-        .filter(|symbol| is_importable_symbol(symbol))
-        .filter_map(|symbol| {
-            module_import_from_file(
-                &normalize_path(&source_root),
-                &local_root,
-                &normalize_path(&symbol.source_path),
+        .flat_map(|(import_root, source_root)| {
+            add_import_candidates_from_source_root(
+                source_root,
+                import_root,
+                path,
+                &symbol_name,
+                &overrides,
             )
         })
         .filter(|import| import != &format!("{local_root}.main"))
@@ -1781,6 +1785,53 @@ fn add_import_code_actions(
                 disabled: None,
                 data: None,
             })
+        })
+        .collect()
+}
+
+fn add_import_candidates_from_source_root(
+    source_root: &Path,
+    import_root: &str,
+    current_path: &Path,
+    symbol_name: &str,
+    source_overrides: &[(PathBuf, String)],
+) -> Vec<String> {
+    let normalized_source_root = normalize_path(source_root);
+    let normalized_current_path = normalize_path(current_path);
+    let mut files = Vec::new();
+    collect_nomo_files(source_root, &mut files);
+    for (path, _) in source_overrides {
+        let normalized_path = normalize_path(path);
+        if normalized_path.starts_with(&normalized_source_root)
+            && path.extension().and_then(|ext| ext.to_str()) == Some("nomo")
+        {
+            files.push(normalized_path);
+        }
+    }
+    files.sort();
+    files.dedup();
+
+    let overrides = source_overrides
+        .iter()
+        .map(|(path, source)| (normalize_path(path), source.clone()))
+        .collect::<HashMap<_, _>>();
+
+    files
+        .into_iter()
+        .filter(|path| normalize_path(path) != normalized_current_path)
+        .filter_map(|path| {
+            let normalized_path = normalize_path(&path);
+            let source = overrides
+                .get(&normalized_path)
+                .cloned()
+                .or_else(|| std::fs::read_to_string(&path).ok())?;
+            let has_symbol = compiler_semantic::symbols_for_text(&path, &source)
+                .ok()?
+                .into_iter()
+                .any(|symbol| symbol.name == symbol_name && is_importable_symbol(&symbol));
+            has_symbol.then(|| {
+                module_import_from_file(&normalized_source_root, import_root, &normalized_path)
+            })?
         })
         .collect()
 }
@@ -2609,6 +2660,64 @@ mod tests {
                     },
                 },
                 new_text: "import app.math\n".to_string(),
+            }]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn code_actions_add_import_for_dependency_module_symbol() {
+        let root = temp_test_root("code-action-add-dependency-import");
+        reset_dir(&root);
+        let dependency = root.join("utils");
+        let project = root.join("hello");
+        fs::create_dir_all(dependency.join("src")).unwrap();
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("src/path.nomo"),
+            "package local_utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"fynn/utils\", path = \"../utils\" }\n",
+        )
+        .unwrap();
+        let main_path = project.join("src/main.nomo");
+        let text = "package app.main\n\nfn main() -> void {\n    let total: i64 = join(40, 2)\n}\n";
+        fs::write(&main_path, text).unwrap();
+        let uri = Url::from_file_path(&main_path).unwrap();
+        let diagnostics = diagnostics_for_text(&main_path, text, &[]);
+
+        let actions =
+            code_actions_for_text(&main_path, text, uri.clone(), &[], &diagnostics).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(action.title, "add `import local_utils.path` to use `join`");
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(
+            edits,
+            &vec![TextEdit {
+                range: Range {
+                    start: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 1,
+                        character: 0,
+                    },
+                },
+                new_text: "import local_utils.path\n".to_string(),
             }]
         );
         fs::remove_dir_all(&root).unwrap();

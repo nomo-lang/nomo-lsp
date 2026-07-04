@@ -99,6 +99,10 @@ const STD_IMPORTS: &[&str] = &[
     "std.json.JsonValue",
     "std.json.parse",
     "std.json.stringify",
+    "std.net",
+    "std.net.NetError",
+    "std.net.TcpStream",
+    "std.net.connect",
     "std.collections",
     "std.collections.StringMap",
     "std.collections.StringSet",
@@ -1885,6 +1889,10 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.json.JsonValue"));
         assert!(items.iter().any(|item| item.label == "std.json.parse"));
         assert!(items.iter().any(|item| item.label == "std.json.stringify"));
+        assert!(items.iter().any(|item| item.label == "std.net"));
+        assert!(items.iter().any(|item| item.label == "std.net.NetError"));
+        assert!(items.iter().any(|item| item.label == "std.net.TcpStream"));
+        assert!(items.iter().any(|item| item.label == "std.net.connect"));
         assert!(items.iter().any(|item| item.label == "std.log"));
         assert!(items.iter().any(|item| item.label == "std.log.enabled"));
         assert!(items.iter().any(|item| item.label == "std.log.info"));

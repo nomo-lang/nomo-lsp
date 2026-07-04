@@ -27,6 +27,7 @@ const STD_IMPORTS: &[&str] = &[
     "std.array.clear",
     "std.array.get",
     "std.array.insert",
+    "std.array.iter",
     "std.array.len",
     "std.array.new",
     "std.array.pop",
@@ -1784,6 +1785,7 @@ mod tests {
         assert!(items.iter().any(|item| item.label == "std.io"));
         assert!(items.iter().any(|item| item.label == "std.io.println"));
         assert!(items.iter().any(|item| item.label == "std.array.clear"));
+        assert!(items.iter().any(|item| item.label == "std.array.iter"));
         assert!(items.iter().any(|item| item.label == "std.array.remove"));
         assert!(items.iter().any(|item| item.label == "app.math"));
         assert!(items.iter().any(|item| item.label == "app.math.extra"));

@@ -1067,6 +1067,9 @@ fn definition_for_document(
 ) -> Option<GotoDefinitionResponse> {
     let compiler_position = to_compiler_position(position);
     if let Ok(project) = nomo::project::discover_project(path) {
+        if let Some(location) = module_definition_for_document(text, position, &project) {
+            return Some(GotoDefinitionResponse::Scalar(location));
+        }
         let location = compiler_semantic::definition_for_project_text(
             &project,
             path,
@@ -1078,6 +1081,61 @@ fn definition_for_document(
         return Some(GotoDefinitionResponse::Scalar(to_lsp_location(location)?));
     }
     definition_for_text(path, text, uri, position)
+}
+
+fn module_definition_for_document(
+    text: &str,
+    position: Position,
+    project: &nomo::project::Project,
+) -> Option<Location> {
+    let import = import_path_at_position(text, position)?;
+    let local_root = local_import_root(text)?;
+    let context = nomo::project::project_module_context(project).ok()?;
+    let source_path = nomo::project::resolve_module_source_path(&context, &local_root, &import)?;
+    let uri = Url::from_file_path(&source_path).ok()?;
+    let range = module_definition_range(&source_path);
+    Some(Location { uri, range })
+}
+
+fn import_path_at_position(text: &str, position: Position) -> Option<Vec<String>> {
+    let line = text.lines().nth(position.line as usize)?;
+    let trimmed_start = line.len() - line.trim_start().len();
+    let rest = line[trimmed_start..].strip_prefix("import ")?;
+    let path_start = trimmed_start + "import ".len();
+    let path_end = path_start
+        + rest
+            .find(|ch: char| ch.is_ascii_whitespace())
+            .unwrap_or(rest.len());
+    let character = utf16_character_to_byte_index(line, position.character);
+    if character < path_start || character > path_end {
+        return None;
+    }
+    let import = &line[path_start..path_end];
+    let parts = import
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.to_string())
+        .collect::<Vec<_>>();
+    (parts.len() >= 2).then_some(parts)
+}
+
+fn module_definition_range(path: &Path) -> Range {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let first_line_len = text
+        .lines()
+        .next()
+        .map(|line| line.encode_utf16().count() as u32)
+        .unwrap_or(0);
+    Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: first_line_len,
+        },
+    }
 }
 
 fn references_for_text(
@@ -2831,6 +2889,109 @@ mod tests {
                     character: 10,
                 },
             }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn definition_returns_local_module_file_for_import_path() {
+        let root = temp_test_root("module-definition-local");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let math = project.join("src/math.nomo");
+        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &math,
+            "package app.math\n\npub fn add() -> i64 {\n    return 1\n}\n",
+        )
+        .unwrap();
+
+        let definition = definition_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 2,
+                character: 12,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(location.uri, Url::from_file_path(&math).unwrap());
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 16,
+                },
+            }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn definition_returns_dependency_module_file_for_import_path() {
+        let root = temp_test_root("module-definition-dependency");
+        reset_dir(&root);
+        let project = root.join("hello");
+        let dependency = root.join("local-utils");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::create_dir_all(dependency.join("src/path")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"local/utils\", path = \"../local-utils\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"local\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let dep_module = dependency.join("src/path/main.nomo");
+        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n}\n";
+        fs::write(&main, main_source).unwrap();
+        fs::write(
+            &dep_module,
+            "package local_utils.path\n\npub fn join() -> i64 {\n    return 1\n}\n",
+        )
+        .unwrap();
+
+        let definition = definition_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 2,
+                character: 20,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.uri,
+            Url::from_file_path(fs::canonicalize(&dep_module).unwrap()).unwrap()
         );
         fs::remove_dir_all(&root).unwrap();
     }

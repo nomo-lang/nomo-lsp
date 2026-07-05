@@ -196,7 +196,7 @@ impl SemanticContext {
             return Some((PROPERTY, len, 0));
         }
 
-        if starts_upper {
+        if is_primitive_type(name) || starts_upper {
             Some((TYPE, len, 0))
         } else {
             Some((VARIABLE, len, 0))
@@ -330,7 +330,7 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32, u32)> {
             let len = name.chars().count() as u32;
             // Treat capitalized identifiers as types (structs, enums, generics).
             let starts_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
-            if starts_upper {
+            if is_primitive_type(name) || starts_upper {
                 Some((TYPE, len, 0))
             } else {
                 Some((VARIABLE, len, 0))
@@ -341,18 +341,51 @@ fn classify(kind: &TokenKind) -> Option<(u32, u32, u32)> {
         TokenKind::Int(value) => Some((NUMBER, value.to_string().chars().count() as u32, 0)),
         TokenKind::Float(value) => Some((NUMBER, value.chars().count() as u32, 0)),
         TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Star
+        | TokenKind::Slash
+        | TokenKind::Percent
         | TokenKind::Equal
+        | TokenKind::Bang
         | TokenKind::EqualEqual
         | TokenKind::BangEqual
-        | TokenKind::Star
         | TokenKind::Less
         | TokenKind::Greater
+        | TokenKind::Amp
+        | TokenKind::Pipe
+        | TokenKind::Caret
         | TokenKind::Question => Some((OPERATOR, 1, 0)),
-        TokenKind::LessEqual | TokenKind::GreaterEqual | TokenKind::Arrow | TokenKind::FatArrow => {
-            Some((OPERATOR, 2, 0))
+        TokenKind::LessEqual
+        | TokenKind::GreaterEqual
+        | TokenKind::PlusEqual
+        | TokenKind::MinusEqual
+        | TokenKind::StarEqual
+        | TokenKind::SlashEqual
+        | TokenKind::PercentEqual
+        | TokenKind::AmpEqual
+        | TokenKind::PipeEqual
+        | TokenKind::CaretEqual
+        | TokenKind::AmpAmp
+        | TokenKind::PipePipe
+        | TokenKind::AmpCaret
+        | TokenKind::PlusPlus
+        | TokenKind::MinusMinus
+        | TokenKind::LessLess
+        | TokenKind::GreaterGreater
+        | TokenKind::Arrow
+        | TokenKind::FatArrow => Some((OPERATOR, 2, 0)),
+        TokenKind::AmpCaretEqual | TokenKind::LessLessEqual | TokenKind::GreaterGreaterEqual => {
+            Some((OPERATOR, 3, 0))
         }
         _ => None,
     }
+}
+
+fn is_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "bool" | "i32" | "i64" | "u32" | "u64" | "f64" | "char" | "string"
+    )
 }
 
 fn previous_significant(tokens: &[Token], index: usize) -> Option<&Token> {
@@ -421,7 +454,55 @@ mod tests {
             assert_eq!(classify(&kind), Some((KEYWORD, text.len() as u32, 0)));
         }
 
-        assert_eq!(classify(&TokenKind::Star), Some((OPERATOR, 1, 0)));
+        for kind in [
+            TokenKind::Plus,
+            TokenKind::Minus,
+            TokenKind::Star,
+            TokenKind::Slash,
+            TokenKind::Percent,
+            TokenKind::Equal,
+            TokenKind::Bang,
+            TokenKind::EqualEqual,
+            TokenKind::BangEqual,
+            TokenKind::Less,
+            TokenKind::Greater,
+            TokenKind::Amp,
+            TokenKind::Pipe,
+            TokenKind::Caret,
+            TokenKind::Question,
+        ] {
+            assert_eq!(classify(&kind), Some((OPERATOR, 1, 0)));
+        }
+        for kind in [
+            TokenKind::LessEqual,
+            TokenKind::GreaterEqual,
+            TokenKind::PlusEqual,
+            TokenKind::MinusEqual,
+            TokenKind::StarEqual,
+            TokenKind::SlashEqual,
+            TokenKind::PercentEqual,
+            TokenKind::AmpEqual,
+            TokenKind::PipeEqual,
+            TokenKind::CaretEqual,
+            TokenKind::AmpAmp,
+            TokenKind::PipePipe,
+            TokenKind::AmpCaret,
+            TokenKind::PlusPlus,
+            TokenKind::MinusMinus,
+            TokenKind::LessLess,
+            TokenKind::GreaterGreater,
+            TokenKind::Arrow,
+            TokenKind::FatArrow,
+        ] {
+            assert_eq!(classify(&kind), Some((OPERATOR, 2, 0)));
+        }
+        for kind in [
+            TokenKind::AmpCaretEqual,
+            TokenKind::LessLessEqual,
+            TokenKind::GreaterGreaterEqual,
+        ] {
+            assert_eq!(classify(&kind), Some((OPERATOR, 3, 0)));
+        }
         assert_eq!(classify(&TokenKind::Pub), Some((KEYWORD, 3, PUBLIC)));
         assert_eq!(classify(&TokenKind::Mut), Some((KEYWORD, 3, MUTABLE)));
         assert_eq!(
@@ -453,6 +534,7 @@ mod tests {
         assert!(classified.contains(&("greet", 12, Some(FUNCTION))));
         assert!(classified.contains(&("println", 13, Some(FUNCTION))));
         assert!(classified.contains(&("name", 4, Some(PROPERTY))));
+        assert!(classified.contains(&("string", 4, Some(TYPE))));
         assert!(classified.contains(&("name", 13, Some(PROPERTY))));
         assert!(classified.contains(&("name", 15, Some(PROPERTY))));
         assert!(classified.contains(&("Ok", 8, Some(ENUM_MEMBER))));

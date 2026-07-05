@@ -2133,7 +2133,7 @@ fn module_package_code_actions(
         return Vec::new();
     }
 
-    vec![CodeActionOrCommand::CodeAction(CodeAction {
+    let mut actions = vec![CodeActionOrCommand::CodeAction(CodeAction {
         title: format!("update package declaration to match module `{expected}`"),
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: Some(vec![lsp_diagnostic.clone()]),
@@ -2152,7 +2152,37 @@ fn module_package_code_actions(
         is_preferred: Some(true),
         disabled: None,
         data: None,
-    })]
+    })];
+    if let Some(target_path) =
+        module_file_path_for_package(path, text, module_source_overrides, &package.name)
+        && normalize_path(&target_path) != normalize_path(path)
+        && !target_path.exists()
+        && target_path.parent().is_some_and(Path::is_dir)
+        && let Ok(new_uri) = Url::from_file_path(&target_path)
+    {
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title: format!("rename module file to match package `{}`", package.name),
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![lsp_diagnostic.clone()]),
+            edit: Some(WorkspaceEdit {
+                changes: None,
+                document_changes: Some(DocumentChanges::Operations(vec![
+                    DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
+                        old_uri: uri.clone(),
+                        new_uri,
+                        options: None,
+                        annotation_id: None,
+                    })),
+                ])),
+                change_annotations: None,
+            }),
+            command: None,
+            is_preferred: Some(false),
+            disabled: None,
+            data: None,
+        }));
+    }
+    actions
 }
 
 fn add_import_code_actions(
@@ -2431,6 +2461,34 @@ fn expected_package_for_current_file(
     let local_root = project_main_import_root(&project, module_source_overrides)
         .or_else(|| local_import_root(text))?;
     module_import_from_file(&source_root, &local_root, &normalized_path)
+}
+
+fn module_file_path_for_package(
+    path: &Path,
+    text: &str,
+    module_source_overrides: &[(PathBuf, String)],
+    package: &str,
+) -> Option<PathBuf> {
+    let project = nomo::project::discover_project(path).ok()?;
+    let context = nomo::project::project_module_context(&project).ok()?;
+    let local_root = project_main_import_root(&project, module_source_overrides)
+        .or_else(|| local_import_root(text))?;
+    let parts = package.split('.').collect::<Vec<_>>();
+    if parts.first().copied() != Some(local_root.as_str())
+        || parts.iter().any(|part| part.is_empty())
+    {
+        return None;
+    }
+    let module_path = &parts[1..];
+    if module_path.is_empty() || (module_path.len() == 1 && module_path[0] == "main") {
+        return Some(context.local_source_root.join("main.nomo"));
+    }
+    let mut target = context.local_source_root.clone();
+    for segment in module_path {
+        target.push(segment);
+    }
+    target.set_extension("nomo");
+    Some(target)
 }
 
 fn project_main_import_root(
@@ -3433,7 +3491,7 @@ mod tests {
         let actions =
             code_actions_for_text(&module_path, text, uri.clone(), &[], &diagnostics).unwrap();
 
-        assert_eq!(actions.len(), 1);
+        assert_eq!(actions.len(), 2);
         let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
             panic!("expected code action");
         };
@@ -3459,6 +3517,28 @@ mod tests {
                 },
                 new_text: "app.math".to_string(),
             }]
+        );
+        let CodeActionOrCommand::CodeAction(action) = &actions[1] else {
+            panic!("expected code action");
+        };
+        assert_eq!(
+            action.title,
+            "rename module file to match package `app.other`"
+        );
+        assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+        let Some(DocumentChanges::Operations(operations)) =
+            action.edit.as_ref().unwrap().document_changes.as_ref()
+        else {
+            panic!("expected document change operations");
+        };
+        assert_eq!(operations.len(), 1);
+        let DocumentChangeOperation::Op(ResourceOp::Rename(rename)) = &operations[0] else {
+            panic!("expected rename file operation");
+        };
+        assert_eq!(rename.old_uri, uri);
+        assert_eq!(
+            rename.new_uri,
+            Url::from_file_path(project.join("src/other.nomo")).unwrap()
         );
         fs::remove_dir_all(&root).unwrap();
     }

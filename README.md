@@ -114,9 +114,9 @@ current document and local project modules. The new name must be a valid Nomo
 identifier; dependency-aware and shadowing-aware rename remain future semantic
 graph work.
 
-Code actions expose compiler suggestions as quick fixes. The first supported
-case is adding missing concrete imports such as `import std.io` or
-`import std.io.println`.
+Code actions expose compiler suggestions as quick fixes, add missing concrete
+imports such as `import std.io` or `import std.io.println`, and can either
+update a mismatched package declaration or rename the module file so both agree.
 
 Inlay hints show conservative inferred type hints for `let` bindings without an
 explicit type annotation, such as `let label = "hi"` rendering `: string`.

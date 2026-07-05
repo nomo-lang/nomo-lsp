@@ -247,7 +247,7 @@ const STD_IMPORTS: &[&str] = &[
 
 fn completion_options() -> CompletionOptions {
     CompletionOptions {
-        trigger_characters: Some(vec![".".to_string(), " ".to_string()]),
+        trigger_characters: Some(vec![".".to_string(), " ".to_string(), "[".to_string()]),
         ..Default::default()
     }
 }
@@ -724,6 +724,10 @@ fn completion_for_document(
     let Some(text) = text else {
         return items;
     };
+    if position.is_some_and(|position| is_attribute_completion_position(text, position)) {
+        items.extend(attribute_completion_items(&mut seen));
+        return items;
+    }
     if position.is_some_and(|position| is_import_completion_position(text, position)) {
         items.extend(import_completion_items(
             path,
@@ -766,6 +770,36 @@ fn keyword_completion_items(seen: &mut BTreeSet<String>) -> Vec<CompletionItem> 
                 ..Default::default()
             })
         })
+        .collect()
+}
+
+fn is_attribute_completion_position(text: &str, position: Position) -> bool {
+    let Some(line) = text.lines().nth(position.line as usize) else {
+        return false;
+    };
+    let byte_index = utf16_character_to_byte_index(line, position.character);
+    let prefix = line[..byte_index.min(line.len())].trim_start();
+    let Some(attribute_prefix) = prefix.strip_prefix("#[") else {
+        return false;
+    };
+    attribute_prefix
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn attribute_completion_items(seen: &mut BTreeSet<String>) -> Vec<CompletionItem> {
+    seen.insert("test".to_string())
+        .then(|| CompletionItem {
+            label: "test".to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("attribute".to_string()),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: "Marks a top-level function for `nomo test` discovery.".to_string(),
+            })),
+            ..Default::default()
+        })
+        .into_iter()
         .collect()
 }
 
@@ -2621,7 +2655,7 @@ mod tests {
 
         assert_eq!(
             options.trigger_characters,
-            Some(vec![".".to_string(), " ".to_string()])
+            Some(vec![".".to_string(), " ".to_string(), "[".to_string()])
         );
     }
 
@@ -2843,6 +2877,26 @@ mod tests {
 
         assert!(items.iter().any(|item| item.label == "fn"));
         assert!(!items.iter().any(|item| item.label == "main"));
+    }
+
+    #[test]
+    fn completion_includes_test_attribute_at_attribute_position() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n#[\nfn checks() -> void {\n}\n";
+
+        let items = completion_for_document(
+            &path,
+            Some(text),
+            Some(Position {
+                line: 2,
+                character: 2,
+            }),
+            &[],
+        );
+
+        let item = items.iter().find(|item| item.label == "test").unwrap();
+        assert_eq!(item.kind, Some(CompletionItemKind::KEYWORD));
+        assert_eq!(item.detail.as_deref(), Some("attribute"));
     }
 
     #[test]

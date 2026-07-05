@@ -16,6 +16,7 @@ const OPERATOR: u32 = 5;
 const FUNCTION: u32 = 6;
 const PROPERTY: u32 = 7;
 const ENUM_MEMBER: u32 = 8;
+const DECORATOR: u32 = 9;
 
 const PUBLIC: u32 = 1 << 0;
 const MUTABLE: u32 = 1 << 1;
@@ -31,6 +32,7 @@ pub fn token_types() -> Vec<SemanticTokenType> {
         SemanticTokenType::FUNCTION,
         SemanticTokenType::PROPERTY,
         SemanticTokenType::ENUM_MEMBER,
+        SemanticTokenType::DECORATOR,
     ]
 }
 
@@ -165,6 +167,9 @@ impl SemanticContext {
         let next = next_significant(tokens, index);
         let starts_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
 
+        if is_attribute_name(tokens, index) {
+            return Some((DECORATOR, len, 0));
+        }
         if previous.is_some_and(|token| matches!(&token.kind, TokenKind::Fn)) {
             return Some((FUNCTION, len, 0));
         }
@@ -433,6 +438,26 @@ fn struct_literal_field_context(tokens: &[Token], index: usize) -> bool {
     false
 }
 
+fn is_attribute_name(tokens: &[Token], index: usize) -> bool {
+    if !matches!(tokens[index].kind, TokenKind::Ident(_)) {
+        return false;
+    }
+    let Some(open_index) = previous_significant_index(tokens, previous_index(tokens, index)) else {
+        return false;
+    };
+    if !matches!(tokens[open_index].kind, TokenKind::LBracket) {
+        return false;
+    }
+    let Some(hash_index) = previous_significant_index(tokens, previous_index(tokens, open_index))
+    else {
+        return false;
+    };
+    if !matches!(tokens[hash_index].kind, TokenKind::Hash) {
+        return false;
+    }
+    next_significant(tokens, index).is_some_and(|token| matches!(token.kind, TokenKind::RBracket))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +565,19 @@ mod tests {
         assert!(classified.contains(&("Ok", 8, Some(ENUM_MEMBER))));
         assert!(classified.contains(&("Ok", 14, Some(ENUM_MEMBER))));
         assert!(classified.contains(&("Err", 9, Some(ENUM_MEMBER))));
+    }
+
+    #[test]
+    fn emits_attribute_semantic_token() {
+        let source = "package app.main\n\n#[test]\nfn checks() -> void {\n}\n";
+        let data = tokens(Path::new("main.nomo"), source);
+        let absolute = absolute_token_details(&data);
+
+        assert_eq!(
+            token_types()[DECORATOR as usize],
+            SemanticTokenType::DECORATOR
+        );
+        assert!(absolute.contains(&(2, 2, DECORATOR, 0)));
     }
 
     #[test]

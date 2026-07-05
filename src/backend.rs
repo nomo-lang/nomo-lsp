@@ -1799,6 +1799,17 @@ fn parameter_hint_signatures(file: &SourceFile) -> HashMap<String, Vec<String>> 
             );
         }
     }
+    for interface in &file.interfaces {
+        for method in &interface.methods {
+            let params = method
+                .params
+                .iter()
+                .filter(|param| param.name != "self")
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            signatures.entry(method.name.clone()).or_insert(params);
+        }
+    }
     for impl_block in &file.impls {
         for method in &impl_block.methods {
             let params = method
@@ -4806,6 +4817,25 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(labels, vec!["message:"]);
         assert_eq!(hints[0].kind, Some(InlayHintKind::PARAMETER));
+    }
+
+    #[test]
+    fn inlay_hints_include_same_file_method_parameter_names() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nstruct Counter {\n    value: i64\n}\n\nimpl Counter {\n    fn add(self, delta: i64) -> i64 {\n        return self.value + delta\n    }\n}\n\ninterface Writer {\n    fn write(self, message: string) -> void\n}\n\nfn main() -> void {\n    let counter = Counter { value: 1 }\n    let value = counter.add(2)\n    writer.write(\"hi\")\n}\n";
+
+        let hints = inlay_hints_for_text(&path, text, full_document_range(text));
+
+        let labels = hints
+            .iter()
+            .filter_map(|hint| match (&hint.kind, &hint.label) {
+                (Some(InlayHintKind::PARAMETER), InlayHintLabel::String(label)) => {
+                    Some(label.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["delta:", "message:"]);
     }
 
     #[test]

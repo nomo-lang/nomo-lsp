@@ -122,8 +122,9 @@ Inlay hints show conservative inferred type hints for `let` bindings without an
 explicit type annotation, such as `let label = "hi"` rendering `: string`.
 Hints are only produced when the type can be determined from syntax-level facts
 such as literals, casts, struct literals, and matching `if`/`match` branch
-types. Same-file function and extern function calls also receive parameter-name
-hints when the callee signature is available in the current parsed file.
+types. Same-file function, extern function, and impl/interface method calls also
+receive parameter-name hints when the callee signature is available in the
+current parsed file.
 
 ## Development
 

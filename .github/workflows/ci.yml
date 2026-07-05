@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  nomo-lsp:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout nomo-lsp
+        uses: actions/checkout@v4
+        with:
+          path: nomo-lsp
+
+      - name: Checkout nomo
+        uses: actions/checkout@v4
+        with:
+          repository: nomo-lang/nomo
+          path: nomo
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Format
+        run: cargo fmt --check
+        working-directory: nomo-lsp
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+        working-directory: nomo-lsp
+
+      - name: Test
+        run: cargo test
+        working-directory: nomo-lsp

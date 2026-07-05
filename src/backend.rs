@@ -321,10 +321,10 @@ impl LanguageServer for Backend {
                     self.workspace_roots.insert(folder.uri.to_string(), path);
                 }
             }
-        } else if let Some(root_uri) = params.root_uri {
-            if let Ok(path) = root_uri.to_file_path() {
-                self.workspace_roots.insert(root_uri.to_string(), path);
-            }
+        } else if let Some(root_uri) = params.root_uri
+            && let Ok(path) = root_uri.to_file_path()
+        {
+            self.workspace_roots.insert(root_uri.to_string(), path);
         }
 
         Ok(InitializeResult {
@@ -705,6 +705,7 @@ impl LanguageServer for Backend {
     }
 }
 
+#[cfg(test)]
 fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> {
     let item = compiler_semantic::symbol_at_position(path, text, to_compiler_position(position))
         .ok()??;
@@ -763,12 +764,12 @@ fn completion_for_document(
 fn keyword_completion_items(seen: &mut BTreeSet<String>) -> Vec<CompletionItem> {
     KEYWORDS
         .iter()
-        .filter_map(|kw| {
-            seen.insert((*kw).to_string()).then(|| CompletionItem {
-                label: kw.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            })
+        .copied()
+        .filter(|kw| seen.insert((*kw).to_string()))
+        .map(|kw| CompletionItem {
+            label: kw.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            ..Default::default()
         })
         .collect()
 }
@@ -904,11 +905,11 @@ fn normalize_path(path: &Path) -> PathBuf {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return canonical;
     }
-    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(mut canonical_parent) = std::fs::canonicalize(parent) {
-            canonical_parent.push(file_name);
-            return canonical_parent;
-        }
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name())
+        && let Ok(mut canonical_parent) = std::fs::canonicalize(parent)
+    {
+        canonical_parent.push(file_name);
+        return canonical_parent;
     }
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -974,7 +975,7 @@ fn completion_item_for_symbol(symbol: SemanticSymbol) -> CompletionItem {
         label: symbol.name,
         kind: Some(completion_kind(symbol.kind)),
         detail: Some(symbol.signature),
-        documentation: (!symbol.docs.is_empty()).then(|| {
+        documentation: (!symbol.docs.is_empty()).then_some({
             Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: symbol.docs,
@@ -1705,10 +1706,9 @@ fn collect_inlay_hints_from_stmts(stmts: &[Stmt], range: &Range, hints: &mut Vec
             } => {
                 if let (Some(position), Some(label)) =
                     (let_name_end_position(span, name), infer_hint_type(value))
+                    && position_in_range(position, range)
                 {
-                    if position_in_range(position, range) {
-                        hints.push(type_inlay_hint(position, label));
-                    }
+                    hints.push(type_inlay_hint(position, label));
                 }
             }
             Stmt::Let { .. } => {}
@@ -2381,9 +2381,7 @@ fn import_insertion_range(text: &str) -> Range {
     let mut line = 1u32;
     for (index, source_line) in text.lines().enumerate() {
         let trimmed = source_line.trim();
-        if trimmed.starts_with("import ") {
-            line = index as u32 + 1;
-        } else if trimmed.starts_with("package ") && line == 1 {
+        if trimmed.starts_with("import ") || trimmed.starts_with("package ") && line == 1 {
             line = index as u32 + 1;
         }
     }
@@ -2442,42 +2440,43 @@ struct PackageDeclaration {
 }
 
 fn package_declaration(text: &str) -> Option<PackageDeclaration> {
-    for (line_index, source_line) in text.lines().enumerate() {
-        let trimmed_start = source_line.len() - source_line.trim_start().len();
-        let rest = source_line[trimmed_start..].strip_prefix("package ")?;
-        let name_start = trimmed_start + "package ".len();
-        let name = rest
-            .split_whitespace()
-            .next()
-            .filter(|name| !name.is_empty())?;
-        let name_end = name_start + name.len();
-        let character_start = source_line[..name_start]
-            .chars()
-            .map(char::len_utf16)
-            .sum::<usize>();
-        let character_end = source_line[..name_end]
-            .chars()
-            .map(char::len_utf16)
-            .sum::<usize>();
-        return Some(PackageDeclaration {
-            name: name.to_string(),
-            line: line_index + 1,
-            column: name_start + 1,
-            length: name.len(),
-            line_text: source_line.to_string(),
-            range: Range {
-                start: Position {
-                    line: line_index as u32,
-                    character: character_start as u32,
+    text.lines()
+        .enumerate()
+        .find_map(|(line_index, source_line)| {
+            let trimmed_start = source_line.len() - source_line.trim_start().len();
+            let rest = source_line[trimmed_start..].strip_prefix("package ")?;
+            let name_start = trimmed_start + "package ".len();
+            let name = rest
+                .split_whitespace()
+                .next()
+                .filter(|name| !name.is_empty())?;
+            let name_end = name_start + name.len();
+            let character_start = source_line[..name_start]
+                .chars()
+                .map(char::len_utf16)
+                .sum::<usize>();
+            let character_end = source_line[..name_end]
+                .chars()
+                .map(char::len_utf16)
+                .sum::<usize>();
+            Some(PackageDeclaration {
+                name: name.to_string(),
+                line: line_index + 1,
+                column: name_start + 1,
+                length: name.len(),
+                line_text: source_line.to_string(),
+                range: Range {
+                    start: Position {
+                        line: line_index as u32,
+                        character: character_start as u32,
+                    },
+                    end: Position {
+                        line: line_index as u32,
+                        character: character_end as u32,
+                    },
                 },
-                end: Position {
-                    line: line_index as u32,
-                    character: character_end as u32,
-                },
-            },
-        });
-    }
-    None
+            })
+        })
 }
 
 fn expected_package_for_current_file(

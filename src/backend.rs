@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
 use nomo::ast::{BinaryOp, Expr, ForVariant, SourceFile, Span, Stmt, TypeRef};
+use nomo::lexer::{Token, TokenKind};
 use nomo::semantic as compiler_semantic;
 use nomo::semantic::{SemanticSymbol, SemanticSymbolKind, TextPosition, TextRange};
 use tower_lsp::jsonrpc::Result;
@@ -1641,6 +1642,8 @@ fn inlay_hints_for_text(path: &Path, text: &str, range: Range) -> Vec<InlayHint>
 
     let mut hints = Vec::new();
     collect_inlay_hints_from_file(&ast, &range, &mut hints);
+    collect_parameter_inlay_hints(&tokens, &ast, &range, &mut hints);
+    hints.sort_by(|left, right| compare_positions(left.position, right.position));
     hints
 }
 
@@ -1724,6 +1727,186 @@ fn type_inlay_hint(position: Position, label: String) -> InlayHint {
         padding_left: None,
         padding_right: Some(true),
         data: None,
+    }
+}
+
+fn parameter_inlay_hint(position: Position, label: &str) -> InlayHint {
+    InlayHint {
+        position,
+        label: InlayHintLabel::String(format!("{label}:")),
+        kind: Some(InlayHintKind::PARAMETER),
+        text_edits: None,
+        tooltip: None,
+        padding_left: None,
+        padding_right: Some(true),
+        data: None,
+    }
+}
+
+fn collect_parameter_inlay_hints(
+    tokens: &[Token],
+    file: &SourceFile,
+    range: &Range,
+    hints: &mut Vec<InlayHint>,
+) {
+    let params = parameter_hint_signatures(file);
+    let mut index = 0;
+    while index < tokens.len() {
+        let Some((callee, lparen_index, next_index)) = call_callee_at(tokens, index) else {
+            index += 1;
+            continue;
+        };
+        index = next_index;
+        let Some(param_names) = params.get(&callee) else {
+            continue;
+        };
+        let Some(args) = call_argument_start_indices(tokens, lparen_index) else {
+            continue;
+        };
+        for (arg_index, param_name) in args.iter().zip(param_names.iter()) {
+            if argument_matches_parameter(tokens, *arg_index, param_name) {
+                continue;
+            }
+            let position = token_position(&tokens[*arg_index]);
+            if position_in_range(position, range) {
+                hints.push(parameter_inlay_hint(position, param_name));
+            }
+        }
+    }
+}
+
+fn parameter_hint_signatures(file: &SourceFile) -> HashMap<String, Vec<String>> {
+    let mut signatures = HashMap::new();
+    for function in &file.functions {
+        signatures.insert(
+            function.name.clone(),
+            function
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+        );
+    }
+    for extern_block in &file.extern_blocks {
+        for function in &extern_block.functions {
+            signatures.insert(
+                function.name.clone(),
+                function
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+            );
+        }
+    }
+    for impl_block in &file.impls {
+        for method in &impl_block.methods {
+            let params = method
+                .params
+                .iter()
+                .filter(|param| param.name != "self")
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            signatures.entry(method.name.clone()).or_insert(params);
+        }
+    }
+    signatures.retain(|_, params| !params.is_empty());
+    signatures
+}
+
+fn call_callee_at(tokens: &[Token], index: usize) -> Option<(String, usize, usize)> {
+    if matches!(
+        previous_significant_token(tokens, index).map(|token| &token.kind),
+        Some(TokenKind::Fn | TokenKind::Struct | TokenKind::Enum | TokenKind::Interface)
+    ) {
+        return None;
+    }
+    let mut cursor = index;
+    let mut last_ident = match &tokens.get(cursor)?.kind {
+        TokenKind::Ident(name) => name.clone(),
+        _ => return None,
+    };
+    cursor += 1;
+    while matches!(
+        tokens.get(cursor).map(|token| &token.kind),
+        Some(TokenKind::Dot)
+    ) {
+        let Some(Token {
+            kind: TokenKind::Ident(name),
+            ..
+        }) = tokens.get(cursor + 1)
+        else {
+            return None;
+        };
+        last_ident = name.clone();
+        cursor += 2;
+    }
+    if !matches!(
+        tokens.get(cursor).map(|token| &token.kind),
+        Some(TokenKind::LParen)
+    ) {
+        return None;
+    }
+    Some((last_ident, cursor, cursor + 1))
+}
+
+fn previous_significant_token(tokens: &[Token], index: usize) -> Option<&Token> {
+    tokens[..index]
+        .iter()
+        .rev()
+        .find(|token| !matches!(token.kind, TokenKind::Newline))
+}
+
+fn call_argument_start_indices(tokens: &[Token], lparen_index: usize) -> Option<Vec<usize>> {
+    let mut args = Vec::new();
+    let mut depth = 0usize;
+    let mut expect_arg = true;
+    let mut index = lparen_index + 1;
+    while let Some(token) = tokens.get(index) {
+        match &token.kind {
+            TokenKind::RParen if depth == 0 => return Some(args),
+            TokenKind::Comma if depth == 0 => {
+                expect_arg = true;
+                index += 1;
+                continue;
+            }
+            TokenKind::Newline if expect_arg => {
+                index += 1;
+                continue;
+            }
+            _ if expect_arg => {
+                args.push(index);
+                expect_arg = false;
+            }
+            _ => {}
+        }
+        match token.kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace if depth > 0 => depth -= 1,
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn argument_matches_parameter(tokens: &[Token], arg_index: usize, param_name: &str) -> bool {
+    matches!(
+        tokens.get(arg_index).map(|token| &token.kind),
+        Some(TokenKind::Ident(name)) if name == param_name
+    )
+}
+
+fn token_position(token: &Token) -> Position {
+    let byte_index = token.column.saturating_sub(1);
+    let character = token
+        .text
+        .get(..byte_index)
+        .map(|prefix| prefix.encode_utf16().count())
+        .unwrap_or(byte_index);
+    Position {
+        line: token.line.saturating_sub(1) as u32,
+        character: character as u32,
     }
 }
 
@@ -4573,6 +4756,56 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(labels, vec![": Label", ": i32", ": bool"]);
+    }
+
+    #[test]
+    fn inlay_hints_include_same_file_function_parameter_names() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nfn add(left: i64, right: i64) -> i64 {\n    return left + right\n}\n\nfn main() -> void {\n    let total = add(1, 2)\n    let copied = add(left, right)\n}\n";
+
+        let hints = inlay_hints_for_text(&path, text, full_document_range(text));
+
+        let labels = hints
+            .iter()
+            .map(|hint| match &hint.label {
+                InlayHintLabel::String(label) => label.as_str(),
+                InlayHintLabel::LabelParts(_) => "",
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["left:", "right:"]);
+        assert_eq!(hints[0].kind, Some(InlayHintKind::PARAMETER));
+        assert_eq!(
+            hints[0].position,
+            Position {
+                line: 7,
+                character: 20,
+            }
+        );
+        assert_eq!(
+            hints[1].position,
+            Position {
+                line: 7,
+                character: 23,
+            }
+        );
+    }
+
+    #[test]
+    fn inlay_hints_include_same_file_extern_function_parameter_names() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nfn main() -> void {\n    let status = puts(\"hi\")\n}\n";
+
+        let hints = inlay_hints_for_text(&path, text, full_document_range(text));
+
+        let labels = hints
+            .iter()
+            .map(|hint| match &hint.label {
+                InlayHintLabel::String(label) => label.as_str(),
+                InlayHintLabel::LabelParts(_) => "",
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["message:"]);
+        assert_eq!(hints[0].kind, Some(InlayHintKind::PARAMETER));
     }
 
     #[test]

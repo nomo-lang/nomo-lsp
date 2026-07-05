@@ -21,7 +21,7 @@ exactly the ones the compiler produces.
 - Find references for current-document and local project module declarations
 - Rename for current-document and local project module identifier occurrences
 - Quick-fix code actions from compiler suggestions
-- Inlay hints for inferred `let` binding types
+- Inlay hints for inferred `let` binding types and same-file function call parameter names
 - Semantic highlighting tokens
 - Full-document formatting through the shared `nomo fmt` formatter
 
@@ -122,7 +122,8 @@ Inlay hints show conservative inferred type hints for `let` bindings without an
 explicit type annotation, such as `let label = "hi"` rendering `: string`.
 Hints are only produced when the type can be determined from syntax-level facts
 such as literals, casts, struct literals, and matching `if`/`match` branch
-types. Parameter-name hints are not implemented yet.
+types. Same-file function and extern function calls also receive parameter-name
+hints when the callee signature is available in the current parsed file.
 
 ## Development
 

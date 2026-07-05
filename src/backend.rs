@@ -963,11 +963,19 @@ fn workspace_symbols_for_roots(
         if !seen_projects.insert(project.root.clone()) {
             continue;
         }
-        let Ok(symbols) =
+        let Ok(mut symbols) =
             compiler_semantic::symbols_for_project_with_overrides(&project, source_overrides)
         else {
             continue;
         };
+        if let Ok(dependency_symbols) =
+            compiler_semantic::dependency_symbols_for_project_with_overrides(
+                &project,
+                source_overrides,
+            )
+        {
+            symbols.extend(dependency_symbols);
+        }
         for symbol in symbols {
             if !query.is_empty() && !symbol.name.to_ascii_lowercase().contains(&query) {
                 continue;
@@ -2907,6 +2915,52 @@ mod tests {
                 .map(|symbol| symbol.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["run_cli", "run_core"]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_symbols_include_dependency_public_symbols() {
+        let root = temp_test_root("workspace-symbol-dependency");
+        reset_dir(&root);
+        let project = root.join("hello");
+        let dependency = root.join("utils");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::create_dir_all(dependency.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nlocal_utils = { package = \"fynn/utils\", path = \"../utils\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("src/main.nomo"),
+            "package app.main\n\nfn main() -> void {\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let dep_module = dependency.join("src/path.nomo");
+        fs::write(
+            &dep_module,
+            "package local_utils.path\n\npub fn join(a: string, b: string) -> string {\n    return a\n}\n\nfn hidden_join() -> string {\n    return \"hidden\"\n}\n",
+        )
+        .unwrap();
+
+        let symbols = workspace_symbols_for_roots(std::slice::from_ref(&project), "join", &[]);
+
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["join"]
+        );
+        assert_eq!(
+            symbols[0].location.uri,
+            Url::from_file_path(fs::canonicalize(&dep_module).unwrap()).unwrap()
         );
         fs::remove_dir_all(&root).unwrap();
     }

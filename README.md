@@ -95,7 +95,8 @@ flattening members into the top level.
 
 Workspace symbols index configured LSP workspace roots. A root that contains a
 Nomo workspace indexes every workspace member; otherwise the nearest project is
-indexed. Results include current open-buffer overlays and are filtered by the
+indexed. Public symbols from dependency packages with source available are
+included. Results include current open-buffer overlays and are filtered by the
 client query.
 
 Go-to-definition resolves references to declarations in the same document, local

@@ -4,6 +4,7 @@ mod backend;
 mod formatting;
 mod inlay_hints;
 mod semantic;
+mod symbols;
 
 use backend::Backend;
 use tower_lsp::{LspService, Server};

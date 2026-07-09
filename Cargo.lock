@@ -412,9 +412,45 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 name = "nomo"
 version = "0.1.0"
 dependencies = [
+ "nomo-codegen-c",
+ "nomo-compiler",
+ "nomo-ir",
+ "nomo-lockfile",
+ "nomo-manifest",
+ "nomo-resolver",
+ "nomo-syntax",
  "serde",
  "serde_json",
  "sha2",
+ "toml",
+]
+
+[[package]]
+name = "nomo-codegen-c"
+version = "0.1.0"
+dependencies = [
+ "nomo-ir",
+]
+
+[[package]]
+name = "nomo-compiler"
+version = "0.1.0"
+dependencies = [
+ "nomo-codegen-c",
+ "nomo-ir",
+ "nomo-syntax",
+]
+
+[[package]]
+name = "nomo-ir"
+version = "0.1.0"
+
+[[package]]
+name = "nomo-lockfile"
+version = "0.1.0"
+dependencies = [
+ "nomo-manifest",
+ "serde",
  "toml",
 ]
 
@@ -427,6 +463,25 @@ dependencies = [
  "tokio",
  "tower-lsp",
 ]
+
+[[package]]
+name = "nomo-manifest"
+version = "0.1.0"
+dependencies = [
+ "toml",
+]
+
+[[package]]
+name = "nomo-resolver"
+version = "0.1.0"
+dependencies = [
+ "nomo-manifest",
+ "sha2",
+]
+
+[[package]]
+name = "nomo-syntax"
+version = "0.1.0"
 
 [[package]]
 name = "once_cell"

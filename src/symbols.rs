@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use nomo::semantic as compiler_semantic;
-use nomo::semantic::{SemanticSymbol, SemanticSymbolKind, TextPosition, TextRange};
+use nomo_lsp_bridge::{SemanticSymbol, SemanticSymbolKind, TextPosition, TextRange};
 use tower_lsp::lsp_types::{
     DocumentSymbol, DocumentSymbolResponse, Location, Position, Range, SymbolInformation,
     SymbolKind, Url,
@@ -111,7 +111,7 @@ fn symbol_information(symbol: SemanticSymbol) -> Option<SymbolInformation> {
 
 #[allow(deprecated)]
 pub(crate) fn document_symbols_for_text(path: &Path, text: &str) -> Option<DocumentSymbolResponse> {
-    let symbols = compiler_semantic::symbols_for_text(path, text).ok()?;
+    let symbols = nomo_lsp_bridge::symbols_for_text(path, text).ok()?;
     let mut items = Vec::<DocumentSymbol>::new();
     for symbol in symbols {
         match symbol.kind {

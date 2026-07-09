@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use nomo::semantic as compiler_semantic;
-use nomo::semantic::{TextPosition, TextRange};
+use nomo_lsp_bridge::{
+    SemanticLocation, TextPosition, TextRange, definition_for_text as bridge_definition_for_text,
+    references_for_text as bridge_references_for_text,
+};
 use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Location, Position, PrepareRenameResponse, Range, TextEdit, Url,
     WorkspaceEdit,
@@ -69,8 +72,7 @@ fn definition_for_text(
     uri: Url,
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
-    let range = compiler_semantic::definition_for_text(path, text, to_compiler_position(position))
-        .ok()??;
+    let range = bridge_definition_for_text(path, text, to_compiler_position(position)).ok()??;
 
     Some(GotoDefinitionResponse::Scalar(Location {
         uri,
@@ -176,7 +178,7 @@ fn references_for_text(
     position: Position,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    let ranges = compiler_semantic::references_for_text(
+    let ranges = bridge_references_for_text(
         path,
         text,
         to_compiler_position(position),
@@ -302,7 +304,7 @@ fn is_nomo_identifier(name: &str) -> bool {
     !RESERVED_KEYWORDS.contains(&name)
 }
 
-fn to_lsp_location(location: compiler_semantic::SemanticLocation) -> Option<Location> {
+fn to_lsp_location(location: SemanticLocation) -> Option<Location> {
     Some(Location {
         uri: Url::from_file_path(location.path).ok()?,
         range: to_lsp_range(location.range),

@@ -4,7 +4,8 @@ use std::path::{Component, Path, PathBuf};
 use dashmap::DashMap;
 use nomo::Diagnostic as NomoDiagnostic;
 use nomo::semantic as compiler_semantic;
-use nomo::semantic::{SemanticSymbol, SemanticSymbolKind, TextPosition};
+use nomo_lsp_bridge as lsp_bridge;
+use nomo_lsp_bridge::{SemanticSymbol, SemanticSymbolKind, TextPosition};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -742,7 +743,7 @@ fn completion_for_document(
         compiler_semantic::symbols_for_project_with_overrides(&project, &source_overrides)
             .unwrap_or_default()
     } else {
-        compiler_semantic::symbols_for_text(path, text).unwrap_or_default()
+        lsp_bridge::symbols_for_text(path, text).unwrap_or_default()
     };
     symbols.sort_by(|left, right| {
         left.name
@@ -1180,7 +1181,7 @@ fn add_import_code_actions(
         return Vec::new();
     }
     let Some(symbol_name) = diagnostic_symbol_name(diagnostic).or_else(|| {
-        compiler_semantic::identifier_at_position(
+        lsp_bridge::identifier_at_position(
             text,
             TextPosition {
                 line: diagnostic.line.saturating_sub(1) as u32,
@@ -1291,7 +1292,7 @@ fn add_import_candidates_from_source_root(
                 .get(&normalized_path)
                 .cloned()
                 .or_else(|| std::fs::read_to_string(&path).ok())?;
-            let has_symbol = compiler_semantic::symbols_for_text(&path, &source)
+            let has_symbol = lsp_bridge::symbols_for_text(&path, &source)
                 .ok()?
                 .into_iter()
                 .any(|symbol| symbol.name == symbol_name && is_importable_symbol(&symbol));

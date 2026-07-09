@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 nomo = { path = "../nomo" }
+nomo-lsp-bridge = { path = "../nomo/crates/nomo_lsp_bridge" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
 dashmap = "6"

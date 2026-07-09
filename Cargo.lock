@@ -416,6 +416,7 @@ dependencies = [
  "nomo-compiler",
  "nomo-ir",
  "nomo-lockfile",
+ "nomo-lsp-bridge",
  "nomo-manifest",
  "nomo-resolver",
  "nomo-syntax",
@@ -460,8 +461,16 @@ version = "0.1.0"
 dependencies = [
  "dashmap 6.2.1",
  "nomo",
+ "nomo-lsp-bridge",
  "tokio",
  "tower-lsp",
+]
+
+[[package]]
+name = "nomo-lsp-bridge"
+version = "0.1.0"
+dependencies = [
+ "nomo-syntax",
 ]
 
 [[package]]

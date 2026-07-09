@@ -11,12 +11,12 @@ jobs:
 
     steps:
       - name: Checkout nomo-lsp
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: nomo-lsp
 
       - name: Checkout nomo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: nomo-lang/nomo
           path: nomo

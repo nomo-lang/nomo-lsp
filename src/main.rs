@@ -2,6 +2,7 @@
 
 mod backend;
 mod formatting;
+mod inlay_hints;
 mod semantic;
 
 use backend::Backend;

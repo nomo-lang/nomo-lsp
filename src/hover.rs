@@ -134,6 +134,30 @@ mod tests {
     }
 
     #[test]
+    fn hover_returns_nested_block_doc_comment() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() -> void {\n}\n\nfn main() -> void {\n    nested()\n}\n";
+
+        let hover = hover_for_text(
+            &path,
+            text,
+            Position {
+                line: 11,
+                character: 6,
+            },
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("pub fn nested() -> void"));
+        assert!(markup.value.contains("Outer docs."));
+        assert!(markup.value.contains("/* Nested docs. */"));
+        assert!(markup.value.contains("Still outer."));
+    }
+
+    #[test]
     fn hover_returns_method_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
         let text = "package app.main\n\nstruct User {\n    email: string\n}\n\nimpl User {\n    /// Reads the stored email.\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n    let email: string = user.email()\n}\n";

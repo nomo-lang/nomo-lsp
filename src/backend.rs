@@ -1795,6 +1795,22 @@ mod tests {
     }
 
     #[test]
+    fn completion_uses_nested_block_doc_comments() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() -> void {\n}\n";
+
+        let items = completion_for_document(&path, Some(text), None, &[]);
+        let nested = items.iter().find(|item| item.label == "nested").unwrap();
+
+        assert_eq!(nested.kind, Some(CompletionItemKind::FUNCTION));
+        assert!(matches!(
+            nested.documentation.as_ref(),
+            Some(Documentation::MarkupContent(markup))
+                if markup.value == "Outer docs.\n/* Nested docs. */\nStill outer."
+        ));
+    }
+
+    #[test]
     fn completion_keeps_keywords_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 

@@ -2,6 +2,7 @@
 
 mod backend;
 mod formatting;
+mod hover;
 mod inlay_hints;
 mod semantic;
 mod symbols;

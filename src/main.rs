@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 mod backend;
+mod formatting;
 mod semantic;
 
 use backend::Backend;

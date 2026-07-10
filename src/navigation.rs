@@ -2,10 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use nomo::semantic as compiler_semantic;
-use nomo_lsp_bridge::{
-    SemanticLocation, TextPosition, TextRange, definition_for_text as bridge_definition_for_text,
-    references_for_text as bridge_references_for_text,
-};
+use nomo_lsp_bridge::{SemanticLocation, TextPosition, TextRange};
 use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Location, Position, PrepareRenameResponse, Range, TextEdit, Url,
     WorkspaceEdit,
@@ -74,7 +71,8 @@ fn definition_for_text(
     uri: Url,
     position: Position,
 ) -> Option<GotoDefinitionResponse> {
-    let range = bridge_definition_for_text(path, text, to_compiler_position(position)).ok()??;
+    let range = compiler_semantic::definition_for_text(path, text, to_compiler_position(position))
+        .ok()??;
 
     Some(GotoDefinitionResponse::Scalar(Location {
         uri,
@@ -180,7 +178,7 @@ fn references_for_text(
     position: Position,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    let ranges = bridge_references_for_text(
+    let ranges = compiler_semantic::references_for_text(
         path,
         text,
         to_compiler_position(position),
@@ -468,6 +466,30 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn definition_uses_receiver_type_for_same_name_fields_without_manifest() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nfn read(user: User) -> string {\n    return user.name\n}\n";
+
+        let definition = definition_for_text(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 11,
+                character: 17,
+            },
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(location.range.start.line, 3);
+        assert_eq!(location.range.start.character, 4);
     }
 
     #[test]
@@ -1247,6 +1269,48 @@ mod tests {
                 character: 7,
             }
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn rename_updates_only_members_with_the_selected_receiver_type() {
+        let root = temp_test_root("receiver-type-rename");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let source = "package app.main\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nimpl User {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nimpl Team {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nfn main() -> void {\n    let user = User { name: \"Ada\" }\n    let team = Team { name: \"Core\" }\n    let user_name: string = user.name\n    let team_name: string = team.name\n}\n";
+        fs::write(&main, source).unwrap();
+        let uri = Url::from_file_path(&main).unwrap();
+
+        let edit = rename_for_document(
+            &main,
+            source,
+            uri.clone(),
+            Position {
+                line: 25,
+                character: 35,
+            },
+            "title",
+            &[],
+        )
+        .unwrap();
+
+        let edits = edit.changes.unwrap().remove(&uri).unwrap();
+        assert_eq!(edits.len(), 4, "{edits:?}");
+        assert_eq!(
+            edits
+                .iter()
+                .map(|edit| edit.range.start.line)
+                .collect::<Vec<_>>(),
+            vec![3, 12, 23, 25]
+        );
+        assert!(edits.iter().all(|edit| edit.new_text == "title"));
         fs::remove_dir_all(&root).unwrap();
     }
 

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use nomo::semantic as compiler_semantic;
-use nomo_lsp_bridge::{SemanticSymbol, SemanticSymbolKind, TextPosition, symbol_at_position};
+use nomo_lsp_bridge::{SemanticSymbol, SemanticSymbolKind, TextPosition};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 pub(crate) fn hover_for_document(
@@ -21,7 +21,7 @@ pub(crate) fn hover_for_document(
         )
         .ok()?
     } else {
-        symbol_at_position(path, text, compiler_position).ok()?
+        compiler_semantic::symbol_at_position(path, text, compiler_position).ok()?
     }?;
 
     Some(hover_for_symbol(&item))
@@ -29,7 +29,8 @@ pub(crate) fn hover_for_document(
 
 #[cfg(test)]
 fn hover_for_text(path: &Path, text: &str, position: Position) -> Option<Hover> {
-    let item = symbol_at_position(path, text, to_compiler_position(position)).ok()??;
+    let item = compiler_semantic::symbol_at_position(path, text, to_compiler_position(position))
+        .ok()??;
 
     Some(hover_for_symbol(&item))
 }

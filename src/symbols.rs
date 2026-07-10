@@ -116,7 +116,7 @@ pub(crate) fn document_symbols_for_text(path: &Path, text: &str) -> Option<Docum
     for symbol in symbols {
         match symbol.kind {
             SemanticSymbolKind::Field => {
-                let Some(owner) = field_owner_name(&symbol.signature).map(str::to_string) else {
+                let Some(owner) = symbol.container_name.clone() else {
                     items.push(document_symbol(symbol));
                     continue;
                 };
@@ -127,7 +127,7 @@ pub(crate) fn document_symbols_for_text(path: &Path, text: &str) -> Option<Docum
                 }
             }
             SemanticSymbolKind::Variant => {
-                let Some(owner) = variant_owner_name(&symbol.signature).map(str::to_string) else {
+                let Some(owner) = symbol.container_name.clone() else {
                     items.push(document_symbol(symbol));
                     continue;
                 };
@@ -137,9 +137,7 @@ pub(crate) fn document_symbols_for_text(path: &Path, text: &str) -> Option<Docum
                 }
             }
             SemanticSymbolKind::InterfaceMethod => {
-                let Some(owner) =
-                    interface_method_owner_name(&symbol.signature).map(str::to_string)
-                else {
+                let Some(owner) = symbol.container_name.clone() else {
                     items.push(document_symbol(symbol));
                     continue;
                 };
@@ -188,29 +186,6 @@ fn push_child_symbol(
         .get_or_insert_with(Vec::new)
         .push(document_symbol(child));
     Ok(())
-}
-
-fn field_owner_name(signature: &str) -> Option<&str> {
-    let rest = signature
-        .strip_prefix("pub field ")
-        .or_else(|| signature.strip_prefix("field "))?;
-    let (path, _) = rest.split_once(':')?;
-    let (owner, _) = path.rsplit_once('.')?;
-    Some(owner)
-}
-
-fn variant_owner_name(signature: &str) -> Option<&str> {
-    let rest = signature.strip_prefix("variant ")?;
-    let path = rest.split('(').next().unwrap_or(rest);
-    let (owner, _) = path.rsplit_once('.')?;
-    Some(owner)
-}
-
-fn interface_method_owner_name(signature: &str) -> Option<&str> {
-    let rest = signature.strip_prefix("fn ")?;
-    let path = rest.split('(').next().unwrap_or(rest);
-    let (owner, _) = path.rsplit_once('.')?;
-    Some(owner)
 }
 
 fn lsp_symbol_kind(kind: SemanticSymbolKind) -> SymbolKind {

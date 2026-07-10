@@ -110,8 +110,9 @@ Find references compares declaration identity rather than raw identifier text.
 It follows local bindings and project declarations while excluding shadowed
 parameters/variables and unrelated same-name declarations. Dependency package
 sources are definition targets but remain outside the editable reference set.
-When receiver type information cannot distinguish same-name fields or methods,
-navigation returns no result instead of guessing by declaration order.
+Fields, struct literal labels, and methods use compiler-checked receiver types,
+so same-name members on different structs resolve to distinct declarations.
+Calls on constrained type parameters resolve to their declaring interface.
 
 Rename reuses those declaration-aware locations across the current document and
 local project modules. The new name must be a valid Nomo identifier. When the

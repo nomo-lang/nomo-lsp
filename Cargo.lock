@@ -424,6 +424,7 @@ dependencies = [
  "nomo-manifest",
  "nomo-resolver",
  "nomo-spans",
+ "nomo-std",
  "nomo-syntax",
  "nomo-test",
  "serde",
@@ -437,6 +438,7 @@ name = "nomo-codegen-c"
 version = "0.1.0"
 dependencies = [
  "nomo-ir",
+ "nomo-runtime",
 ]
 
 [[package]]
@@ -447,6 +449,7 @@ dependencies = [
  "nomo-diagnostics",
  "nomo-graph",
  "nomo-ir",
+ "nomo-std",
  "nomo-syntax",
 ]
 
@@ -462,6 +465,7 @@ name = "nomo-doc"
 version = "0.1.0"
 dependencies = [
  "nomo-diagnostics",
+ "nomo-std",
  "nomo-syntax",
 ]
 
@@ -527,7 +531,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nomo-runtime"
+version = "0.1.0"
+
+[[package]]
 name = "nomo-spans"
+version = "0.1.0"
+
+[[package]]
+name = "nomo-std"
 version = "0.1.0"
 
 [[package]]

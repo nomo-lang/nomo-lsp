@@ -5,6 +5,7 @@ mod formatting;
 mod hover;
 mod inlay_hints;
 mod navigation;
+mod rename;
 mod semantic;
 mod symbols;
 

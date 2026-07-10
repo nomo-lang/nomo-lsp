@@ -101,20 +101,23 @@ indexed. Public symbols from dependency packages with source available are
 included. Results include current open-buffer overlays and are filtered by the
 client query.
 
-Go-to-definition resolves references to declarations in the same document, local
-project modules under `src/**/*.nomo`, and public symbols from imported
-dependency modules with source available. Whole-workspace definition lookup
-remains a future semantic graph slice.
+Go-to-definition resolves local bindings, declarations in the same document,
+local project modules under `src/**/*.nomo`, and public symbols from imported
+dependency modules with source available. Cross-package lookup across every
+member of a workspace remains a later graph extension.
 
-Find references returns lexical identifier occurrences in the same document and
-local project modules for the selected declaration name. Precise shadowing-aware,
-dependency-aware, and workspace-wide references will come from the shared
-semantic graph.
+Find references compares declaration identity rather than raw identifier text.
+It follows local bindings and project declarations while excluding shadowed
+parameters/variables and unrelated same-name declarations. Dependency package
+sources are definition targets but remain outside the editable reference set.
+When receiver type information cannot distinguish same-name fields or methods,
+navigation returns no result instead of guessing by declaration order.
 
-Rename reuses the same reference locations to return a workspace edit across the
-current document and local project modules. The new name must be a valid Nomo
-identifier; dependency-aware and shadowing-aware rename remain future semantic
-graph work.
+Rename reuses those declaration-aware locations across the current document and
+local project modules. The new name must be a valid Nomo identifier. When the
+original program checks successfully, the proposed in-memory edits are checked
+again by the compiler and rejected if they introduce declaration collisions or
+other semantic errors.
 
 Code actions expose compiler suggestions as quick fixes, add missing concrete
 imports such as `import std.io` or `import std.io.println`, and can either

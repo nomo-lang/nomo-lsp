@@ -11,6 +11,8 @@ use tower_lsp::lsp_types::{
     WorkspaceEdit,
 };
 
+use crate::rename::rename_preserves_compilation;
+
 const RESERVED_KEYWORDS: &[&str] = &[
     "package",
     "import",
@@ -207,6 +209,7 @@ pub(crate) fn rename_for_document(
     if !is_nomo_identifier(new_name) {
         return None;
     }
+    let current_uri = uri.clone();
     let locations = references_for_document(path, text, uri, position, true, source_overrides)?;
     if locations.is_empty() {
         return None;
@@ -222,6 +225,10 @@ pub(crate) fn rename_for_document(
             range: location.range,
             new_text: new_name.to_string(),
         });
+    }
+
+    if !rename_preserves_compilation(path, text, &current_uri, &changes, source_overrides) {
+        return None;
     }
 
     Some(WorkspaceEdit {
@@ -499,22 +506,38 @@ mod tests {
     }
 
     #[test]
-    fn definition_returns_none_for_unknown_identifier() {
+    fn definition_returns_local_binding_declaration() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let definition = definition_for_text(
             &path,
             text,
             uri,
             Position {
-                line: 3,
-                character: 8,
+                line: 4,
+                character: 16,
             },
-        );
+        )
+        .unwrap();
 
-        assert!(definition.is_none());
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert_eq!(
+            location.range,
+            Range {
+                start: Position {
+                    line: 3,
+                    character: 8,
+                },
+                end: Position {
+                    line: 3,
+                    character: 15,
+                },
+            }
+        );
     }
 
     #[test]
@@ -626,23 +649,26 @@ mod tests {
     }
 
     #[test]
-    fn references_return_none_for_unknown_identifier() {
+    fn references_return_local_binding_locations() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let references = references_for_text(
             &path,
             text,
             uri,
             Position {
-                line: 3,
-                character: 8,
+                line: 4,
+                character: 16,
             },
             true,
-        );
+        )
+        .unwrap();
 
-        assert!(references.is_none());
+        assert_eq!(references.len(), 2);
+        assert_eq!(references[0].range.start.line, 3);
+        assert_eq!(references[1].range.start.line, 4);
     }
 
     #[test]
@@ -687,6 +713,32 @@ mod tests {
     }
 
     #[test]
+    fn rename_excludes_shadowing_parameter_references() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn value() -> i64 {\n    return 1\n}\n\nfn consume(value: i64) -> i64 {\n    return value\n}\n\nfn main() -> void {\n    let result: i64 = value()\n}\n";
+
+        let edit = rename_for_document(
+            &path,
+            text,
+            uri.clone(),
+            Position {
+                line: 11,
+                character: 24,
+            },
+            "answer",
+            &[],
+        )
+        .unwrap();
+
+        let edits = edit.changes.unwrap().remove(&uri).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[0].range.start.line, 2);
+        assert_eq!(edits[1].range.start.line, 11);
+        assert!(edits.iter().all(|edit| edit.new_text == "answer"));
+    }
+
+    #[test]
     fn rename_rejects_invalid_identifier() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
@@ -701,6 +753,48 @@ mod tests {
                 character: 4,
             },
             "for",
+            &[],
+        );
+
+        assert!(edit.is_none());
+    }
+
+    #[test]
+    fn rename_rejects_top_level_declaration_collision() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn first() -> i64 {\n    return 1\n}\n\nfn second() -> i64 {\n    return 2\n}\n\nfn main() -> void {\n    let value: i64 = first()\n}\n";
+
+        let edit = rename_for_document(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 11,
+                character: 24,
+            },
+            "second",
+            &[],
+        );
+
+        assert!(edit.is_none());
+    }
+
+    #[test]
+    fn rename_rejects_local_binding_collision() {
+        let path = PathBuf::from("main.nomo");
+        let uri = Url::parse("file:///tmp/main.nomo").unwrap();
+        let text = "package app.main\n\nfn main() -> void {\n    let first: i64 = 1\n    let second: i64 = first\n}\n";
+
+        let edit = rename_for_document(
+            &path,
+            text,
+            uri,
+            Position {
+                line: 4,
+                character: 25,
+            },
+            "second",
             &[],
         );
 
@@ -790,23 +884,36 @@ mod tests {
     }
 
     #[test]
-    fn prepare_rename_returns_none_for_unknown_identifier() {
+    fn prepare_rename_accepts_local_binding() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let prepared = prepare_rename_for_document(
             &path,
             text,
             uri,
             Position {
-                line: 3,
-                character: 8,
+                line: 4,
+                character: 16,
             },
             &[],
-        );
+        )
+        .unwrap();
 
-        assert!(prepared.is_none());
+        assert_eq!(
+            prepared,
+            PrepareRenameResponse::Range(Range {
+                start: Position {
+                    line: 4,
+                    character: 15,
+                },
+                end: Position {
+                    line: 4,
+                    character: 22,
+                },
+            })
+        );
     }
 
     #[test]

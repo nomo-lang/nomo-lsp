@@ -78,6 +78,9 @@ const STD_IMPORTS: &[&str] = &[
     "std.env.home_dir",
     "std.env.set",
     "std.env.temp_dir",
+    "std.ffi",
+    "std.ffi.CString",
+    "std.ffi.Opaque",
     "std.fs",
     "std.fs.File",
     "std.fs.FileMetadata",
@@ -1941,6 +1944,9 @@ mod tests {
         );
         assert!(items.iter().any(|item| item.label == "std.crypto.sha256"));
         assert!(items.iter().any(|item| item.label == "std.regex"));
+        assert!(items.iter().any(|item| item.label == "std.ffi"));
+        assert!(items.iter().any(|item| item.label == "std.ffi.CString"));
+        assert!(items.iter().any(|item| item.label == "std.ffi.Opaque"));
         assert!(items.iter().any(|item| item.label == "std.regex.Regex"));
         assert!(items.iter().any(|item| item.label == "std.regex.compile"));
         assert!(items.iter().any(|item| item.label == "std.regex.captures"));

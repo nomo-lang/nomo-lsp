@@ -78,7 +78,8 @@ Completion always includes v0.1 keywords. On `import` lines it adds supported
 available. When the current document parses, completion also includes top-level
 declarations and methods from the current document or, inside a project, local
 `src/**/*.nomo` modules. Open editor buffers are used as overlays so unsaved
-module declarations can appear in completion.
+module declarations can appear in completion. The standard import index includes
+the native-boundary `std.ffi.CString` and `std.ffi.Opaque` types.
 
 Hover indexes the open document, local project `src/**/*.nomo` modules, and
 public symbols from imported dependency modules with source available when a

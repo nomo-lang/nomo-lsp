@@ -157,14 +157,31 @@ pub(crate) fn references_for_document(
 ) -> Option<Vec<Location>> {
     let compiler_position = to_compiler_position(position);
     if let Ok(project) = nomo::project::discover_project(path) {
-        let locations = compiler_semantic::references_for_project_text(
-            &project,
-            path,
-            text,
-            compiler_position,
-            include_declaration,
-            source_overrides,
-        )
+        let locations = if let Ok(workspace) = nomo::project::discover_workspace(path)
+            && workspace
+                .members
+                .iter()
+                .any(|member| member.root == project.root)
+        {
+            compiler_semantic::references_for_workspace_text(
+                &workspace,
+                &project,
+                path,
+                text,
+                compiler_position,
+                include_declaration,
+                source_overrides,
+            )
+        } else {
+            compiler_semantic::references_for_project_text(
+                &project,
+                path,
+                text,
+                compiler_position,
+                include_declaration,
+                source_overrides,
+            )
+        }
         .ok()??;
         return locations.into_iter().map(to_lsp_location).collect();
     }
@@ -1273,6 +1290,150 @@ mod tests {
     }
 
     #[test]
+    fn workspace_references_include_dependent_member_calls() {
+        let root = temp_test_root("workspace-references");
+        let (core_main, cli_main, core_source) = setup_workspace(
+            &root,
+            "package cli.main\n\nimport core.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+        );
+
+        let references = references_for_document(
+            &core_main,
+            core_source,
+            Url::from_file_path(&core_main).unwrap(),
+            Position {
+                line: 2,
+                character: 8,
+            },
+            true,
+            &[],
+        )
+        .unwrap();
+
+        assert!(references.iter().any(|location| {
+            location.uri == Url::from_file_path(&core_main).unwrap()
+                && location.range.start
+                    == Position {
+                        line: 2,
+                        character: 7,
+                    }
+        }));
+        assert!(references.iter().any(|location| {
+            location.uri == Url::from_file_path(&cli_main).unwrap()
+                && location.range.start
+                    == Position {
+                        line: 5,
+                        character: 21,
+                    }
+        }));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_rename_updates_declaration_and_dependent_member() {
+        let root = temp_test_root("workspace-rename");
+        let (core_main, cli_main, core_source) = setup_workspace(
+            &root,
+            "package cli.main\n\nimport core.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+        );
+        let core_uri = Url::from_file_path(&core_main).unwrap();
+        let cli_uri = Url::from_file_path(&cli_main).unwrap();
+
+        let edit = rename_for_document(
+            &core_main,
+            core_source,
+            core_uri.clone(),
+            Position {
+                line: 2,
+                character: 8,
+            },
+            "sum",
+            &[],
+        )
+        .unwrap();
+
+        let changes = edit.changes.unwrap();
+        assert_eq!(changes.get(&core_uri).unwrap().len(), 1);
+        assert_eq!(changes.get(&cli_uri).unwrap().len(), 1);
+        assert!(
+            changes
+                .values()
+                .flatten()
+                .all(|edit| edit.new_text == "sum")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_rename_rejects_collision_in_dependent_member() {
+        let root = temp_test_root("workspace-rename-dependent-collision");
+        let (core_main, _, core_source) = setup_workspace(
+            &root,
+            "package cli.main\n\nimport core.main\n\nfn sum(a: i64, b: i64) -> i64 {\n    return a - b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+        );
+
+        let edit = rename_for_document(
+            &core_main,
+            core_source,
+            Url::from_file_path(&core_main).unwrap(),
+            Position {
+                line: 2,
+                character: 8,
+            },
+            "sum",
+            &[],
+        );
+
+        assert!(edit.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn workspace_references_keep_external_path_dependencies_read_only() {
+        let root = temp_test_root("workspace-external-references");
+        reset_dir(&root);
+        let app = root.join("app");
+        let external = root.join("external");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::create_dir_all(external.join("src")).unwrap();
+        fs::write(root.join("nomo.toml"), "[workspace]\nmembers = [\"app\"]\n").unwrap();
+        fs::write(
+            app.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\nexternal = { package = \"other/external\", path = \"../external\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            external.join("nomo.toml"),
+            "[package]\nnamespace = \"other\"\nname = \"external\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let app_main = app.join("src/main.nomo");
+        let external_main = external.join("src/main.nomo");
+        let app_source = "package app.main\n\nimport external.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        fs::write(&app_main, app_source).unwrap();
+        fs::write(
+            &external_main,
+            "package external.main\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+        )
+        .unwrap();
+
+        let references = references_for_document(
+            &app_main,
+            app_source,
+            Url::from_file_path(&app_main).unwrap(),
+            Position {
+                line: 5,
+                character: 23,
+            },
+            true,
+            &[],
+        );
+
+        assert!(references.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn rename_updates_only_members_with_the_selected_receiver_type() {
         let root = temp_test_root("receiver-type-rename");
         reset_dir(&root);
@@ -1312,6 +1473,35 @@ mod tests {
         );
         assert!(edits.iter().all(|edit| edit.new_text == "title"));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn setup_workspace(root: &Path, cli_source: &str) -> (PathBuf, PathBuf, &'static str) {
+        const CORE_SOURCE: &str = "package core.main\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n}\n";
+        reset_dir(root);
+        let core = root.join("packages/core");
+        let cli = root.join("apps/cli");
+        fs::create_dir_all(core.join("src")).unwrap();
+        fs::create_dir_all(cli.join("src")).unwrap();
+        fs::write(
+            root.join("nomo.toml"),
+            "[workspace]\nmembers = [\"apps/*\", \"packages/*\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            core.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"core\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        fs::write(
+            cli.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"cli\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\ncore = { package = \"fynn/core\", path = \"../../packages/core\" }\n",
+        )
+        .unwrap();
+        let core_main = core.join("src/main.nomo");
+        let cli_main = cli.join("src/main.nomo");
+        fs::write(&core_main, CORE_SOURCE).unwrap();
+        fs::write(&cli_main, cli_source).unwrap();
+        (core_main, cli_main, CORE_SOURCE)
     }
 
     fn reset_dir(path: &Path) {

@@ -20,6 +20,19 @@ pub(crate) fn rename_preserves_compilation(
     if let Ok(project) = nomo::project::discover_project(path) {
         let mut original_sources = source_overrides.to_vec();
         replace_source_override(&mut original_sources, path, text.to_string());
+        if let Ok(workspace) = nomo::project::discover_workspace(path)
+            && workspace
+                .members
+                .iter()
+                .any(|member| member.root == project.root)
+        {
+            if nomo::project::check_workspace_with_overrides(&workspace, &original_sources).is_err()
+            {
+                return true;
+            }
+            return nomo::project::check_workspace_with_overrides(&workspace, &renamed_sources)
+                .is_ok();
+        }
         if nomo::project::check_project_with_overrides(&project, &original_sources).is_err() {
             return true;
         }

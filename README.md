@@ -114,22 +114,23 @@ client query.
 
 Go-to-definition resolves local bindings, declarations in the same document,
 local project modules under `src/**/*.nomo`, and public symbols from imported
-dependency modules with source available. Cross-package lookup across every
-member of a workspace remains a later graph extension.
+dependency modules with source available, including workspace member path
+dependencies.
 
 Find references compares declaration identity rather than raw identifier text.
-It follows local bindings and project declarations while excluding shadowed
-parameters/variables and unrelated same-name declarations. Dependency package
-sources are definition targets but remain outside the editable reference set.
+It follows local bindings and project declarations across every member of the
+current Nomo workspace while excluding shadowed parameters/variables and
+unrelated same-name declarations. Dependency package sources outside the
+workspace are definition targets but remain outside the editable reference set.
 Fields, struct literal labels, and methods use compiler-checked receiver types,
 so same-name members on different structs resolve to distinct declarations.
 Calls on constrained type parameters resolve to their declaring interface.
 
-Rename reuses those declaration-aware locations across the current document and
-local project modules. The new name must be a valid Nomo identifier. When the
-original program checks successfully, the proposed in-memory edits are checked
-again by the compiler and rejected if they introduce declaration collisions or
-other semantic errors.
+Rename reuses those declaration-aware locations across the current document,
+local project modules, and dependent workspace members. The new name must be a
+valid Nomo identifier. When the original workspace checks successfully, the
+proposed in-memory edits are checked across every member and rejected if they
+introduce declaration collisions or other semantic errors.
 
 Code actions expose compiler suggestions as quick fixes, add missing concrete
 imports such as `import std.io` or `import std.io.println`, and can either

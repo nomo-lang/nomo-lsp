@@ -687,6 +687,8 @@ name = "nomo-resolver"
 version = "0.1.0"
 dependencies = [
  "nomo-manifest",
+ "serde",
+ "serde_json",
  "sha2",
  "ureq",
 ]

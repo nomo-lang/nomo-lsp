@@ -414,13 +414,18 @@ version = "0.1.0"
 dependencies = [
  "nomo-codegen-c",
  "nomo-compiler",
+ "nomo-diagnostics",
+ "nomo-doc",
  "nomo-fmt",
+ "nomo-graph",
  "nomo-ir",
  "nomo-lockfile",
  "nomo-lsp-bridge",
  "nomo-manifest",
  "nomo-resolver",
+ "nomo-spans",
  "nomo-syntax",
+ "nomo-test",
  "serde",
  "serde_json",
  "sha2",
@@ -439,7 +444,24 @@ name = "nomo-compiler"
 version = "0.1.0"
 dependencies = [
  "nomo-codegen-c",
+ "nomo-diagnostics",
+ "nomo-graph",
  "nomo-ir",
+ "nomo-syntax",
+]
+
+[[package]]
+name = "nomo-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "nomo-spans",
+]
+
+[[package]]
+name = "nomo-doc"
+version = "0.1.0"
+dependencies = [
+ "nomo-diagnostics",
  "nomo-syntax",
 ]
 
@@ -447,8 +469,13 @@ dependencies = [
 name = "nomo-fmt"
 version = "0.1.0"
 dependencies = [
+ "nomo-diagnostics",
  "nomo-syntax",
 ]
+
+[[package]]
+name = "nomo-graph"
+version = "0.1.0"
 
 [[package]]
 name = "nomo-ir"
@@ -458,6 +485,7 @@ version = "0.1.0"
 name = "nomo-lockfile"
 version = "0.1.0"
 dependencies = [
+ "nomo-graph",
  "nomo-manifest",
  "serde",
  "toml",
@@ -478,6 +506,8 @@ dependencies = [
 name = "nomo-lsp-bridge"
 version = "0.1.0"
 dependencies = [
+ "nomo-diagnostics",
+ "nomo-spans",
  "nomo-syntax",
 ]
 
@@ -497,7 +527,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nomo-spans"
+version = "0.1.0"
+
+[[package]]
 name = "nomo-syntax"
+version = "0.1.0"
+dependencies = [
+ "nomo-diagnostics",
+ "nomo-spans",
+]
+
+[[package]]
+name = "nomo-test"
 version = "0.1.0"
 
 [[package]]

@@ -50,7 +50,18 @@ server only adapts compiler ranges, signatures and suggestions into LSP types.
 
 ## Build and install
 
+Tagged releases provide `nomo-lsp` archives for Linux x86-64, macOS x86-64 and
+Apple silicon, and Windows x86-64 on the
+[GitHub Releases page](https://github.com/nomo-lang/nomo-lsp/releases). Extract
+the archive for your platform and place `nomo-lsp` (or `nomo-lsp.exe`) on your
+`PATH`. The archive includes a checksum in the release's `SHA256SUMS` file.
+
+To build from source, clone both repositories as siblings:
+
 ```bash
+git clone https://github.com/nomo-lang/nomo.git
+git clone https://github.com/nomo-lang/nomo-lsp.git
+cd nomo-lsp
 cargo build --release
 # or install the binary onto your PATH so editors can find it:
 cargo install --path .
@@ -138,6 +149,11 @@ current parsed file.
 cargo run     # start the server (communicates over stdio)
 cargo test
 ```
+
+The release workflow checks out the matching `nomo` tag beside `nomo-lsp`, so a
+tagged language-server release requires the same `v<version>` tag to exist in
+both repositories. Manual workflow runs use the current `main` branches and
+build artifacts without publishing a release.
 
 ## License
 

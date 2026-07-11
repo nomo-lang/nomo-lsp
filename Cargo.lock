@@ -705,6 +705,7 @@ version = "0.1.0"
 name = "nomo-std"
 version = "0.1.0"
 dependencies = [
+ "nomo-syntax",
  "serde",
  "toml",
 ]

@@ -361,17 +361,25 @@ mod tests {
 
         let symbols = workspace_symbols_for_roots(std::slice::from_ref(&project), "join", &[]);
 
+        assert_eq!(symbols.len(), 2);
+        assert!(symbols.iter().all(|symbol| symbol.name == "join"));
         assert_eq!(
             symbols
                 .iter()
-                .map(|symbol| symbol.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["join"]
-        );
-        assert_eq!(
-            symbols[0].location.uri,
+                .find(|symbol| symbol.location.uri.to_file_path().unwrap()
+                    == fs::canonicalize(&dep_module).unwrap())
+                .unwrap()
+                .location
+                .uri,
             Url::from_file_path(fs::canonicalize(&dep_module).unwrap()).unwrap()
         );
+        assert!(symbols.iter().any(|symbol| {
+            symbol
+                .location
+                .uri
+                .to_file_path()
+                .is_ok_and(|path| path.ends_with("std/src/path.nomo"))
+        }));
         fs::remove_dir_all(&root).unwrap();
     }
 

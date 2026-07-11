@@ -32,20 +32,12 @@ jobs:
 
     env:
       ASSET_NAME: nomo-lsp-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
-      NOMO_REF: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'main' }}
 
     steps:
       - name: Checkout nomo-lsp
         uses: actions/checkout@v5
         with:
           path: nomo-lsp
-
-      - name: Checkout matching compiler
-        uses: actions/checkout@v5
-        with:
-          repository: nomo-lang/nomo
-          ref: ${{ env.NOMO_REF }}
-          path: nomo
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -69,10 +61,14 @@ jobs:
         working-directory: nomo-lsp
         shell: bash
         run: |
+          std_manifest=$(cargo metadata --format-version 1 | python3 -c 'import json, sys; data=json.load(sys.stdin); print(next(package["manifest_path"] for package in data["packages"] if package["name"] == "nomo-std"))')
+          std_root=$(dirname "$std_manifest")
           mkdir release
           cp "target/${{ matrix.target }}/release/nomo-lsp" release/
           cp README.md LICENSE release/
-          cp -R ../nomo/std release/std
+          mkdir -p release/std
+          cp -R "$std_root/src" release/std/src
+          cp "$std_root/intrinsics.toml" release/std/intrinsics.toml
           tar -C release -czf "$ASSET_NAME" nomo-lsp README.md LICENSE std
 
       - name: Package Windows binary
@@ -80,10 +76,15 @@ jobs:
         working-directory: nomo-lsp
         shell: pwsh
         run: |
+          $metadata = cargo metadata --format-version 1 | ConvertFrom-Json
+          $stdManifest = ($metadata.packages | Where-Object { $_.name -eq "nomo-std" }).manifest_path
+          $stdRoot = Split-Path $stdManifest
           New-Item -ItemType Directory -Path release
           Copy-Item "target/${{ matrix.target }}/release/nomo-lsp.exe" release/
           Copy-Item README.md, LICENSE release/
-          Copy-Item ../nomo/std release/std -Recurse
+          New-Item -ItemType Directory -Path release/std
+          Copy-Item (Join-Path $stdRoot "src") release/std -Recurse
+          Copy-Item (Join-Path $stdRoot "intrinsics.toml") release/std
           Compress-Archive -Path release/* -DestinationPath $env:ASSET_NAME
 
       - name: Upload release archive

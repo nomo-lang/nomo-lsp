@@ -5,7 +5,7 @@ programming language, built on [tower-lsp](https://github.com/ebkalderon/tower-l
 
 `nomo-lsp` is the single source of language intelligence for every Nomo editor
 integration. It links directly against the [`nomo`](https://github.com/nomo-lang/nomo)
-compiler crate (as a `path` dependency), so the diagnostics it reports are
+compiler crate (as a pinned Git dependency), so the diagnostics it reports are
 exactly the ones the compiler produces.
 
 ## Features
@@ -44,9 +44,9 @@ server only adapts compiler ranges, signatures and suggestions into LSP types.
 
 ## Requirements
 
-- A recent stable Rust toolchain (the crate uses edition 2024).
-- The [`nomo`](https://github.com/nomo-lang/nomo) crate, expected as a sibling
-  checkout at `../nomo` (referenced as a `path` dependency).
+- A recent stable Rust toolchain (the crate uses edition 2024). The compiler
+  crates are fetched automatically from the pinned
+  [`nomo`](https://github.com/nomo-lang/nomo) Git revision.
 
 ## Build and install
 
@@ -58,10 +58,10 @@ the archive for your platform and place `nomo-lsp` (or `nomo-lsp.exe`) on your
 hover, workspace-symbol, and go-to-definition targets available after install.
 The release includes a checksum in the release's `SHA256SUMS` file.
 
-To build from source, clone both repositories as siblings:
+To build from source, clone this repository; Cargo fetches the pinned compiler
+revision automatically:
 
 ```bash
-git clone https://github.com/nomo-lang/nomo.git
 git clone https://github.com/nomo-lang/nomo-lsp.git
 cd nomo-lsp
 cargo build --release
@@ -154,10 +154,8 @@ cargo run     # start the server (communicates over stdio)
 cargo test
 ```
 
-The release workflow checks out the matching `nomo` tag beside `nomo-lsp`, so a
-tagged language-server release requires the same `v<version>` tag to exist in
-both repositories. Manual workflow runs use the current `main` branches and
-build artifacts without publishing a release.
+The release workflow and source build use the same pinned compiler revision from
+`Cargo.toml`; no sibling `nomo` checkout is required.
 
 ## License
 

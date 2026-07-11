@@ -15,12 +15,6 @@ jobs:
         with:
           path: nomo-lsp
 
-      - name: Checkout nomo
-        uses: actions/checkout@v5
-        with:
-          repository: nomo-lang/nomo
-          path: nomo
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

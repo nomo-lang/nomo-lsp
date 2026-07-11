@@ -54,7 +54,9 @@ Tagged releases provide `nomo-lsp` archives for Linux x86-64, macOS x86-64 and
 Apple silicon, and Windows x86-64 on the
 [GitHub Releases page](https://github.com/nomo-lang/nomo-lsp/releases). Extract
 the archive for your platform and place `nomo-lsp` (or `nomo-lsp.exe`) on your
-`PATH`. The archive includes a checksum in the release's `SHA256SUMS` file.
+`PATH`. The archive also includes `std/src/*.nomo`, which keeps standard-library
+hover, workspace-symbol, and go-to-definition targets available after install.
+The release includes a checksum in the release's `SHA256SUMS` file.
 
 To build from source, clone both repositories as siblings:
 
@@ -93,12 +95,13 @@ module declarations can appear in completion. Standard import completion reads
 the shared toolchain `nomo-std` registry, including the native-boundary
 `std.ffi.CString` and `std.ffi.Opaque` types.
 
-Hover indexes the open document, local project `src/**/*.nomo` modules, and
-public symbols from imported dependency modules with source available when a
-nearest `nomo.toml` is available. It shows the parsed signature plus any `///`
-or `/** */` item doc comment. Extern function declarations participate in the
-same hover path. Open editor buffers are used as overlays so unsaved module
-edits can participate in hover results.
+Hover indexes the open document, imported toolchain `std/src/*.nomo` source,
+local project `src/**/*.nomo` modules, and public symbols from imported
+dependency modules with source available when a nearest `nomo.toml` is
+available. It shows the parsed signature plus any `///` or `/** */` item doc
+comment. Extern function declarations participate in the same hover path. Open
+editor buffers are used as overlays so unsaved module edits can participate in
+hover results.
 
 Document symbols use the same parsed declaration index to power editor outline
 views for top-level structs, enums, interfaces, constants, functions, extern
@@ -106,16 +109,16 @@ functions, and methods. Struct fields, enum variants, and interface methods are
 nested under their parent type so outlines preserve the source model instead of
 flattening members into the top level.
 
-Workspace symbols index configured LSP workspace roots. A root that contains a
-Nomo workspace indexes every workspace member; otherwise the nearest project is
-indexed. Public symbols from dependency packages with source available are
-included. Results include current open-buffer overlays and are filtered by the
-client query.
+Workspace symbols index configured LSP workspace roots and the toolchain-owned
+standard-library source. A root that contains a Nomo workspace indexes every
+workspace member; otherwise the nearest project is indexed. Public symbols from
+dependency packages with source available are included. Results include current
+open-buffer overlays and are filtered by the client query.
 
 Go-to-definition resolves local bindings, declarations in the same document,
-local project modules under `src/**/*.nomo`, and public symbols from imported
-dependency modules with source available, including workspace member path
-dependencies.
+toolchain standard-library source modules, local project modules under
+`src/**/*.nomo`, and public symbols from imported dependency modules with source
+available, including workspace member path dependencies.
 
 Find references compares declaration identity rather than raw identifier text.
 It follows local bindings and project declarations across every member of the

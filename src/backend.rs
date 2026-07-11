@@ -546,6 +546,11 @@ fn completion_for_document(
     } else {
         lsp_bridge::symbols_for_text(path, text).unwrap_or_default()
     };
+    if let Ok(standard_symbols) =
+        compiler_semantic::standard_library_symbols_for_imports(path, text)
+    {
+        symbols.extend(standard_symbols);
+    }
     symbols.sort_by(|left, right| {
         left.name
             .cmp(&right.name)

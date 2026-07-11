@@ -86,6 +86,14 @@ fn module_definition_for_document(
     project: &nomo::project::Project,
 ) -> Option<Location> {
     let import = import_path_at_position(text, position)?;
+    if import.first().map(String::as_str) == Some("std") {
+        let module = import[..2].join(".");
+        let source_path =
+            nomo::standard_library::module_source_path(nomo::standard_library::module(&module)?);
+        let uri = Url::from_file_path(&source_path).ok()?;
+        let range = module_definition_range(&source_path);
+        return Some(Location { uri, range });
+    }
     let local_root = local_import_root(text)?;
     let context = nomo::project::project_module_context(project).ok()?;
     let source_path = nomo::project::resolve_module_source_path(&context, &local_root, &import)?;
@@ -1057,6 +1065,46 @@ mod tests {
                     character: 16,
                 },
             }
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn definition_returns_standard_library_source_for_import_path() {
+        let root = temp_test_root("module-definition-std");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let main_source = "package app.main\n\nimport std.string.split\n\nfn main() -> void {\n}\n";
+        fs::write(&main, main_source).unwrap();
+
+        let definition = definition_for_document(
+            &main,
+            main_source,
+            Url::from_file_path(&main).unwrap(),
+            Position {
+                line: 2,
+                character: 15,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let GotoDefinitionResponse::Scalar(location) = definition else {
+            panic!("expected scalar definition location");
+        };
+        assert!(
+            location
+                .uri
+                .to_file_path()
+                .unwrap()
+                .ends_with("std/src/string.nomo")
         );
         fs::remove_dir_all(&root).unwrap();
     }

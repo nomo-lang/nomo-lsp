@@ -54,6 +54,26 @@ pub(crate) fn workspace_symbols_for_roots(
         }
     }
 
+    if let Ok(standard_symbols) = compiler_semantic::standard_library_symbols() {
+        for symbol in standard_symbols {
+            if !query.is_empty() && !symbol.name.to_ascii_lowercase().contains(&query) {
+                continue;
+            }
+            let key = (
+                symbol.source_path.clone(),
+                symbol.name.clone(),
+                symbol.selection_range.start.line,
+                symbol.selection_range.start.character,
+            );
+            if !seen_symbols.insert(key) {
+                continue;
+            }
+            if let Some(item) = symbol_information(symbol) {
+                items.push(item);
+            }
+        }
+    }
+
     items.sort_by(|left, right| {
         left.name
             .cmp(&right.name)

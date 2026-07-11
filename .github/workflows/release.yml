@@ -72,7 +72,8 @@ jobs:
           mkdir release
           cp "target/${{ matrix.target }}/release/nomo-lsp" release/
           cp README.md LICENSE release/
-          tar -C release -czf "$ASSET_NAME" nomo-lsp README.md LICENSE
+          cp -R ../nomo/std release/std
+          tar -C release -czf "$ASSET_NAME" nomo-lsp README.md LICENSE std
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
@@ -82,6 +83,7 @@ jobs:
           New-Item -ItemType Directory -Path release
           Copy-Item "target/${{ matrix.target }}/release/nomo-lsp.exe" release/
           Copy-Item README.md, LICENSE release/
+          Copy-Item ../nomo/std release/std -Recurse
           Compress-Archive -Path release/* -DestinationPath $env:ASSET_NAME
 
       - name: Upload release archive

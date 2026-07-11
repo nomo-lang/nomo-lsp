@@ -342,6 +342,49 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    #[test]
+    fn hover_uses_standard_library_source_docs() {
+        let root = temp_test_root("semantic-hover-std");
+        reset_dir(&root);
+        let project = root.join("hello");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main = project.join("src/main.nomo");
+        let main_source = "package app.main\n\nimport std.string.split\n\nfn main() -> void {\n    let parts: Array<string> = split(\"a\", \",\")\n}\n";
+        fs::write(&main, main_source).unwrap();
+
+        let line = main_source.lines().nth(5).unwrap();
+        let hover = hover_for_document(
+            &main,
+            main_source,
+            Position {
+                line: 5,
+                character: line.find("split").unwrap() as u32 + 1,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(
+            markup
+                .value
+                .contains("pub fn split(value: string, separator: string)")
+        );
+        assert!(
+            markup
+                .value
+                .contains("Splits a string by a non-empty separator.")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     fn reset_dir(path: &Path) {
         if path.exists() {
             fs::remove_dir_all(path).unwrap();

@@ -666,11 +666,13 @@ dependencies = [
 
 [[package]]
 name = "nomo-lsp"
-version = "0.1.0"
+version = "0.0.0-20260713145859"
 dependencies = [
  "dashmap 6.2.1",
  "nomo",
  "nomo-lsp-bridge",
+ "serde_json",
+ "sha2",
  "tokio",
  "tower-lsp",
 ]

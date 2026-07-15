@@ -11,6 +11,9 @@ exactly the ones the compiler produces.
 ## Features
 
 - Real-time diagnostics from the Nomo compiler front-end
+- Content-addressed session caches for diagnostics, completion, document
+  symbols, and semantic tokens, with dependency-aware edit invalidation
+- Versioned diagnostic publication so an older analysis cannot replace a newer edit
 - Manifest-aware dependency alias diagnostics matching `nomo check`
 - Full-document text synchronization (open / change / save / close)
 - Keyword, import path and semantic symbol completion
@@ -41,6 +44,13 @@ Completion, hover, document symbols, workspace symbols, go-to-definition,
 references, and rename are backed by the compiler crate's reusable `semantic`
 API. Code actions are backed by compiler diagnostics and suggestions. The LSP
 server only adapts compiler ranges, signatures and suggestions into LSP types.
+
+The in-memory incremental session exposes `nomo.cache.stats` and
+`nomo.cache.clear` through `workspace/executeCommand`. Cache keys include the
+schema, toolchain version, host target, document contents, open-buffer overlays,
+and nearest manifest. An edit invalidates every cached result that declared the
+changed document as an input. Cache hits never bypass rename revalidation or
+compiler diagnostics.
 
 ## Requirements
 

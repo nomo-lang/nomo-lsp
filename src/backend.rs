@@ -12,6 +12,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::formatting::{formatting_edits_for_text, range_formatting_edits_for_text};
 use crate::hover::hover_for_document;
+use crate::incremental::{IncrementalSession, QueryKey, dependency_paths};
 use crate::inlay_hints::inlay_hints_for_text;
 use crate::navigation::{
     definition_for_document, prepare_rename_for_document, references_for_document,
@@ -64,8 +65,11 @@ pub struct Backend {
     client: Client,
     /// In-memory contents of every open document, keyed by its URI.
     documents: DashMap<Url, String>,
+    /// Latest LSP version for open documents, used to reject stale diagnostics.
+    document_versions: DashMap<Url, i32>,
     /// Workspace roots supplied by the client during initialization.
     workspace_roots: DashMap<String, PathBuf>,
+    incremental: IncrementalSession,
 }
 
 impl Backend {
@@ -73,22 +77,34 @@ impl Backend {
         Self {
             client,
             documents: DashMap::new(),
+            document_versions: DashMap::new(),
             workspace_roots: DashMap::new(),
+            incremental: IncrementalSession::default(),
         }
     }
 
     /// Run the compiler front-end over the given text and publish the resulting
     /// diagnostics (currently the first error the compiler reports, or none).
-    async fn analyze(&self, uri: Url, text: &str) {
+    async fn analyze(&self, uri: Url, text: &str, version: Option<i32>) {
         let path = uri
             .to_file_path()
             .unwrap_or_else(|_| PathBuf::from(uri.path()));
         let module_source_overrides = self.document_overrides();
 
-        let diagnostics = diagnostics_for_text(&path, text, &module_source_overrides);
+        let key = QueryKey::for_document(
+            "diagnostics",
+            path.to_string_lossy(),
+            &path,
+            text,
+            &module_source_overrides,
+        );
+        let dependencies = dependency_paths(&path, &module_source_overrides);
+        let diagnostics = self.incremental.diagnostics(key, dependencies, || {
+            diagnostics_for_text(&path, text, &module_source_overrides)
+        });
 
         self.client
-            .publish_diagnostics(uri, diagnostics, None)
+            .publish_diagnostics(uri, diagnostics, version)
             .await;
     }
 
@@ -171,6 +187,13 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "nomo.cache.stats".to_string(),
+                        "nomo.cache.clear".to_string(),
+                    ],
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
         })
@@ -189,16 +212,28 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
+        let version = params.text_document.version;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        self.incremental.invalidate_path(&path);
         self.documents.insert(uri.clone(), text.clone());
-        self.analyze(uri, &text).await;
+        self.document_versions.insert(uri.clone(), version);
+        self.analyze(uri, &text, Some(version)).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        let version = params.text_document.version;
         if let Some(change) = params.content_changes.into_iter().last() {
             let text = change.text;
+            let path = uri
+                .to_file_path()
+                .unwrap_or_else(|_| PathBuf::from(uri.path()));
+            self.incremental.invalidate_path(&path);
             self.documents.insert(uri.clone(), text.clone());
-            self.analyze(uri, &text).await;
+            self.document_versions.insert(uri.clone(), version);
+            self.analyze(uri, &text, Some(version)).await;
         }
     }
 
@@ -208,13 +243,28 @@ impl LanguageServer for Backend {
             .text
             .or_else(|| self.documents.get(&uri).map(|t| t.clone()))
         {
+            let path = uri
+                .to_file_path()
+                .unwrap_or_else(|_| PathBuf::from(uri.path()));
+            self.incremental.invalidate_path(&path);
             self.documents.insert(uri.clone(), text.clone());
-            self.analyze(uri, &text).await;
+            let version = self.document_versions.get(&uri).map(|value| *value);
+            self.analyze(uri, &text, version).await;
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents.remove(&params.text_document.uri);
+        let uri = params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        self.incremental.invalidate_path(&path);
+        self.documents.remove(&uri);
+        self.document_versions.remove(&uri);
+    }
+
+    async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
+        self.incremental.clear();
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -228,12 +278,25 @@ impl LanguageServer for Backend {
             .map(|t| t.clone())
             .or_else(|| std::fs::read_to_string(&path).ok());
         let source_overrides = self.document_overrides();
-        Ok(Some(CompletionResponse::Array(completion_for_document(
+        let position = params.text_document_position.position;
+        let text_for_key = text.as_deref().unwrap_or("");
+        let key = QueryKey::for_document(
+            "completion",
+            format!(
+                "{}:{}:{}",
+                path.display(),
+                position.line,
+                position.character
+            ),
             &path,
-            text.as_deref(),
-            Some(params.text_document_position.position),
+            text_for_key,
             &source_overrides,
-        ))))
+        );
+        let dependencies = dependency_paths(&path, &source_overrides);
+        let items = self.incremental.completions(key, dependencies, || {
+            completion_for_document(&path, text.as_deref(), Some(position), &source_overrides)
+        });
+        Ok(Some(CompletionResponse::Array(items)))
     }
 
     async fn symbol(
@@ -289,7 +352,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(document_symbols_for_text(&path, &text))
+        let key = QueryKey::for_document(
+            "document-symbols",
+            path.to_string_lossy(),
+            &path,
+            &text,
+            &[],
+        );
+        let symbols = self.incremental.document_symbols(key, [path.clone()], || {
+            document_symbols_for_text(&path, &text)
+        });
+        Ok(symbols)
     }
 
     async fn goto_definition(
@@ -486,7 +559,11 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let data = semantic::tokens(&path, &text);
+        let key =
+            QueryKey::for_document("semantic-tokens", path.to_string_lossy(), &path, &text, &[]);
+        let data = self
+            .incremental
+            .semantic_tokens(key, [path.clone()], || semantic::tokens(&path, &text));
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
             data,
@@ -505,11 +582,50 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let data = semantic::tokens_in_range(&path, &text, params.range);
+        let range = params.range;
+        let key = QueryKey::for_document(
+            "semantic-tokens-range",
+            format!(
+                "{}:{}:{}:{}:{}",
+                path.display(),
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character
+            ),
+            &path,
+            &text,
+            &[],
+        );
+        let data = self.incremental.semantic_tokens(key, [path.clone()], || {
+            semantic::tokens_in_range(&path, &text, range)
+        });
         Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data,
         })))
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        match params.command.as_str() {
+            "nomo.cache.stats" => {
+                let stats = self.incremental.stats();
+                Ok(Some(serde_json::json!({
+                    "schema": 1,
+                    "hits": stats.hits,
+                    "misses": stats.misses,
+                    "invalidations": stats.invalidations,
+                    "entries": stats.entries,
+                })))
+            }
+            "nomo.cache.clear" => Ok(Some(serde_json::json!({
+                "removed": self.incremental.clear(),
+            }))),
+            _ => Ok(None),
+        }
     }
 }
 

@@ -56,6 +56,22 @@ jobs:
         working-directory: nomo-lsp
         run: cargo build --locked --release --target ${{ matrix.target }}
 
+      - name: Smoke test Unix LSP protocol and latency
+        if: runner.os != 'Windows'
+        working-directory: nomo-lsp
+        run: >-
+          python3 scripts/lsp_release_gate.py
+          --lsp target/${{ matrix.target }}/release/nomo-lsp
+          --output nomo-lsp-${{ matrix.target }}-release-gate.json
+
+      - name: Smoke test Windows LSP protocol and latency
+        if: runner.os == 'Windows'
+        working-directory: nomo-lsp
+        run: >-
+          python scripts/lsp_release_gate.py
+          --lsp target/${{ matrix.target }}/release/nomo-lsp.exe
+          --output nomo-lsp-${{ matrix.target }}-release-gate.json
+
       - name: Package Unix binary
         if: runner.os != 'Windows'
         working-directory: nomo-lsp
@@ -91,7 +107,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
-          path: nomo-lsp/${{ env.ASSET_NAME }}
+          path: |
+            nomo-lsp/${{ env.ASSET_NAME }}
+            nomo-lsp/nomo-lsp-${{ matrix.target }}-release-gate.json
           if-no-files-found: error
 
   publish:
@@ -118,12 +136,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          prerelease_args=()
+          if [[ "$GITHUB_REF_NAME" == v0.0.0-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$GITHUB_REF_NAME" dist/* \
               --generate-notes \
               --verify-tag \
+              "${prerelease_args[@]}" \
               --title "Nomo Language Server $GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY"
           fi

@@ -25,9 +25,27 @@ jobs:
         working-directory: nomo-lsp
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked -- -D warnings
         working-directory: nomo-lsp
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
         working-directory: nomo-lsp
+
+      - name: Build release language server
+        run: cargo build --locked --release
+        working-directory: nomo-lsp
+
+      - name: LSP launch, diagnostics, completion, and latency gate
+        run: >-
+          python3 scripts/lsp_release_gate.py
+          --lsp target/release/nomo-lsp
+          --output performance/results/lsp-release-gate.json
+        working-directory: nomo-lsp
+
+      - name: Upload LSP release-gate evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: nomo-lsp-release-gate
+          path: nomo-lsp/performance/results/lsp-release-gate.json
+          if-no-files-found: error

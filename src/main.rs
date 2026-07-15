@@ -3,6 +3,7 @@
 mod backend;
 mod formatting;
 mod hover;
+mod incremental;
 mod inlay_hints;
 mod navigation;
 mod rename;

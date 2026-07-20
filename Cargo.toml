@@ -1,6 +1,6 @@
 [package]
 name = "nomo-lsp"
-version = "0.0.0-20260713145859"
+version = "0.0.0-20260720080715"
 edition = "2024"
 license = "MIT"
 description = "Language Server Protocol implementation for the Nomo programming language"
@@ -10,8 +10,8 @@ name = "nomo-lsp"
 path = "src/main.rs"
 
 [dependencies]
-nomo = { git = "https://github.com/nomo-lang/nomo.git", rev = "77b0386" }
-nomo-lsp-bridge = { git = "https://github.com/nomo-lang/nomo.git", rev = "77b0386" }
+nomo = { git = "https://github.com/nomo-lang/nomo.git", rev = "6c064e68ed3da437ffe16ba39ae7317b768b0fd3" }
+nomo-lsp-bridge = { git = "https://github.com/nomo-lang/nomo.git", rev = "6c064e68ed3da437ffe16ba39ae7317b768b0fd3" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
 dashmap = "6"

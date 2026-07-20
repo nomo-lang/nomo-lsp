@@ -570,8 +570,8 @@ dependencies = [
 
 [[package]]
 name = "nomo"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-codegen-c",
  "nomo-compiler",
@@ -586,7 +586,9 @@ dependencies = [
  "nomo-resolver",
  "nomo-spans",
  "nomo-std",
+ "nomo-supply-chain",
  "nomo-syntax",
+ "nomo-target",
  "nomo-test",
  "serde",
  "serde_json",
@@ -596,17 +598,18 @@ dependencies = [
 
 [[package]]
 name = "nomo-codegen-c"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-ir",
  "nomo-runtime",
+ "nomo-target",
 ]
 
 [[package]]
 name = "nomo-compiler"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-codegen-c",
  "nomo-diagnostics",
@@ -614,20 +617,21 @@ dependencies = [
  "nomo-ir",
  "nomo-std",
  "nomo-syntax",
+ "nomo-target",
 ]
 
 [[package]]
 name = "nomo-diagnostics"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-spans",
 ]
 
 [[package]]
 name = "nomo-doc"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-diagnostics",
  "nomo-std",
@@ -636,8 +640,8 @@ dependencies = [
 
 [[package]]
 name = "nomo-fmt"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-diagnostics",
  "nomo-syntax",
@@ -645,28 +649,30 @@ dependencies = [
 
 [[package]]
 name = "nomo-graph"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 
 [[package]]
 name = "nomo-ir"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 
 [[package]]
 name = "nomo-lockfile"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-graph",
  "nomo-manifest",
+ "nomo-supply-chain",
+ "nomo-target",
  "serde",
  "toml",
 ]
 
 [[package]]
 name = "nomo-lsp"
-version = "0.0.0-20260713145859"
+version = "0.0.0-20260720080715"
 dependencies = [
  "dashmap 6.2.1",
  "nomo",
@@ -679,8 +685,8 @@ dependencies = [
 
 [[package]]
 name = "nomo-lsp-bridge"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-diagnostics",
  "nomo-spans",
@@ -689,18 +695,22 @@ dependencies = [
 
 [[package]]
 name = "nomo-manifest"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
+ "nomo-target",
+ "semver",
+ "serde",
  "toml",
 ]
 
 [[package]]
 name = "nomo-resolver"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-manifest",
+ "nomo-supply-chain",
  "serde",
  "serde_json",
  "sha2",
@@ -709,18 +719,18 @@ dependencies = [
 
 [[package]]
 name = "nomo-runtime"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 
 [[package]]
 name = "nomo-spans"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 
 [[package]]
 name = "nomo-std"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-syntax",
  "serde",
@@ -728,18 +738,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "nomo-supply-chain"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
+dependencies = [
+ "nomo-manifest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "nomo-syntax"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 dependencies = [
  "nomo-diagnostics",
  "nomo-spans",
 ]
 
 [[package]]
+name = "nomo-target"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
+
+[[package]]
 name = "nomo-test"
-version = "0.1.0"
-source = "git+https://github.com/nomo-lang/nomo.git?rev=77b0386#77b0386bb6fdd5133eda52760f12d19f6dd992c3"
+version = "0.0.0-20260720080715"
+source = "git+https://github.com/nomo-lang/nomo.git?rev=6c064e68ed3da437ffe16ba39ae7317b768b0fd3#6c064e68ed3da437ffe16ba39ae7317b768b0fd3"
 
 [[package]]
 name = "once_cell"
@@ -968,6 +995,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"

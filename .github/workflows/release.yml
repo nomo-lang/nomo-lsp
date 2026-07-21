@@ -119,6 +119,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Download release archives
@@ -130,6 +133,11 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum nomo-lsp-* > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/nomo-lsp-*
 
       - name: Create or update GitHub release
         env:

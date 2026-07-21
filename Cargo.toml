@@ -1,6 +1,6 @@
 [package]
 name = "nomo-lsp"
-version = "0.0.0-20260720080715"
+version = "0.0.0-20260721120555"
 edition = "2024"
 license = "MIT"
 description = "Language Server Protocol implementation for the Nomo programming language"

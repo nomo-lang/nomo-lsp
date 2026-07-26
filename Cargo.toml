@@ -10,8 +10,8 @@ name = "nomo-lsp"
 path = "src/main.rs"
 
 [dependencies]
-nomo = { git = "https://github.com/nomo-lang/nomo.git", rev = "6c064e68ed3da437ffe16ba39ae7317b768b0fd3" }
-nomo-lsp-bridge = { git = "https://github.com/nomo-lang/nomo.git", rev = "6c064e68ed3da437ffe16ba39ae7317b768b0fd3" }
+nomo = { git = "https://github.com/nomo-lang/nomo.git", rev = "5b176e4ead5e5541f95c591dc38e77befff63182" }
+nomo-lsp-bridge = { git = "https://github.com/nomo-lang/nomo.git", rev = "5b176e4ead5e5541f95c591dc38e77befff63182" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
 dashmap = "6"

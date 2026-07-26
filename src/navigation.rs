@@ -1133,7 +1133,7 @@ mod tests {
         fs::write(&main, main_source).unwrap();
         fs::write(
             &dep_module,
-            "package local_utils.path\n\npub fn join() -> i64 {\n    return 1\n}\n",
+            "package utils.path\n\npub fn join() -> i64 {\n    return 1\n}\n",
         )
         .unwrap();
 
@@ -1183,7 +1183,7 @@ mod tests {
         fs::write(&main, main_source).unwrap();
         fs::write(
             &dep_module,
-            "package local_utils.path\n\n/// Joins values.\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package utils.path\n\n/// Joins values.\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
 

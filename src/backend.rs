@@ -1631,7 +1631,7 @@ mod tests {
         fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
         fs::write(
             dependency.join("src/path.nomo"),
-            "package local_utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         fs::write(
@@ -1976,11 +1976,7 @@ mod tests {
         )
         .unwrap();
         fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
-        fs::write(
-            dependency.join("src/path.nomo"),
-            "package local_utils.path\n",
-        )
-        .unwrap();
+        fs::write(dependency.join("src/path.nomo"), "package utils.path\n").unwrap();
         let overlay_path = dependency.join("src/path/extra.nomo");
         fs::write(
             project.join("nomo.toml"),
@@ -1998,7 +1994,7 @@ mod tests {
                 line: 2,
                 character: 13,
             }),
-            &[(overlay_path, "package local_utils.path.extra\n".to_string())],
+            &[(overlay_path, "package utils.path.extra\n".to_string())],
         );
 
         assert!(items.iter().any(|item| item.label == "local_utils"));
@@ -2115,7 +2111,7 @@ mod tests {
         .unwrap();
         fs::write(
             dependency.join("src/path.nomo"),
-            "package local_utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         fs::write(

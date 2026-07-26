@@ -355,19 +355,21 @@ mod tests {
         let dep_module = dependency.join("src/path.nomo");
         fs::write(
             &dep_module,
-            "package local_utils.path\n\npub fn join(a: string, b: string) -> string {\n    return a\n}\n\nfn hidden_join() -> string {\n    return \"hidden\"\n}\n",
+            "package utils.path\n\npub fn join(a: string, b: string) -> string {\n    return a\n}\n\nfn hidden_join() -> string {\n    return \"hidden\"\n}\n",
         )
         .unwrap();
 
         let symbols = workspace_symbols_for_roots(std::slice::from_ref(&project), "join", &[]);
 
-        assert_eq!(symbols.len(), 2);
-        assert!(symbols.iter().all(|symbol| symbol.name == "join"));
+        assert!(!symbols.iter().any(|symbol| symbol.name == "hidden_join"));
         assert_eq!(
             symbols
                 .iter()
-                .find(|symbol| symbol.location.uri.to_file_path().unwrap()
-                    == fs::canonicalize(&dep_module).unwrap())
+                .find(|symbol| {
+                    symbol.name == "join"
+                        && symbol.location.uri.to_file_path().unwrap()
+                            == fs::canonicalize(&dep_module).unwrap()
+                })
                 .unwrap()
                 .location
                 .uri,

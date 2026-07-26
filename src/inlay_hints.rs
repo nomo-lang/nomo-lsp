@@ -72,14 +72,27 @@ fn collect_inlay_hints_from_stmts(stmts: &[Stmt], range: &Range, hints: &mut Vec
                 | ForVariant::Iterate { body, .. } => {
                     collect_inlay_hints_from_stmts(body, range, hints)
                 }
+                ForVariant::CStyle { update, body, .. } => {
+                    collect_inlay_hints_from_stmts(std::slice::from_ref(update), range, hints);
+                    collect_inlay_hints_from_stmts(body, range, hints);
+                }
             },
             Stmt::Defer { stmt, .. } => {
                 collect_inlay_hints_from_stmts(std::slice::from_ref(stmt), range, hints);
+            }
+            Stmt::TaskScope { body, .. } | Stmt::TaskDeadline { body, .. } => {
+                collect_inlay_hints_from_stmts(body, range, hints);
+            }
+            Stmt::TaskSelect { arms, .. } => {
+                for arm in arms {
+                    collect_inlay_hints_from_stmts(&arm.body, range, hints);
+                }
             }
             Stmt::Unsafe { body, .. } => {
                 collect_inlay_hints_from_stmts(body, range, hints);
             }
             Stmt::Assign { .. }
+            | Stmt::IndexAssign { .. }
             | Stmt::Postfix { .. }
             | Stmt::Return { .. }
             | Stmt::Expr { .. }
@@ -340,6 +353,17 @@ fn compare_positions(left: Position, right: Position) -> std::cmp::Ordering {
 
 fn infer_hint_type(expr: &Expr) -> Option<String> {
     match expr {
+        Expr::ArrayLiteral { elements } => {
+            let mut inferred = elements.iter().filter_map(infer_array_element_hint_type);
+            let first = inferred.next()?;
+            inferred
+                .all(|label| label == first)
+                .then(|| format!("Array<{first}>"))
+        }
+        Expr::Index { base, .. } => infer_hint_type(base)?
+            .strip_prefix("Array<")?
+            .strip_suffix('>')
+            .map(str::to_string),
         Expr::String(_) => Some("string".to_string()),
         Expr::Int(_) => Some("i64".to_string()),
         Expr::Float(_) => Some("f64".to_string()),
@@ -368,6 +392,13 @@ fn infer_hint_type(expr: &Expr) -> Option<String> {
         | Expr::MutArg { .. }
         | Expr::Panic { .. }
         | Expr::Void => None,
+    }
+}
+
+fn infer_array_element_hint_type(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Int(_) => Some("i32".to_string()),
+        other => infer_hint_type(other),
     }
 }
 
@@ -509,6 +540,34 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(labels, vec![": Label", ": i32", ": bool"]);
+    }
+
+    #[test]
+    fn inlay_hints_cover_arrays_c_style_loops_and_structured_task_bodies() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nsuspend fn main() -> void {\n    let values = [1, 2]\n    let first = [1, 2][0]\n    for let i = 0; i < 1; i++ {\n        let inside = true\n    }\n    task.scope {\n        let scoped = \"ready\"\n        task.deadline(time.duration_millis(5)) {\n            let bounded = 1\n        }\n        task.select {\n            task.receive(messages) => message {\n                let received = 'r'\n            }\n            task.sleep(time.duration_millis(50)) => timeout {\n                let elapsed = 3.14\n            }\n        }\n    }\n}\n";
+
+        let hints = inlay_hints_for_text(&path, text, full_document_range(text));
+
+        let labels = hints
+            .iter()
+            .filter_map(|hint| match (&hint.kind, &hint.label) {
+                (Some(InlayHintKind::TYPE), InlayHintLabel::String(label)) => Some(label.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec![
+                ": Array<i32>",
+                ": i32",
+                ": bool",
+                ": string",
+                ": i64",
+                ": char",
+                ": f64",
+            ]
+        );
     }
 
     #[test]

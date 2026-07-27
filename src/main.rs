@@ -8,6 +8,7 @@ mod inlay_hints;
 mod navigation;
 mod rename;
 mod semantic;
+mod signature_help;
 mod symbols;
 
 use backend::Backend;

@@ -24,6 +24,10 @@ jobs:
         run: cargo fmt --check
         working-directory: nomo-lsp
 
+      - name: Check canonical syntax fixtures
+        run: python3 scripts/check_syntax_governance.py
+        working-directory: nomo-lsp
+
       - name: Clippy
         run: cargo clippy --locked -- -D warnings
         working-directory: nomo-lsp

@@ -4,5 +4,6 @@
   "completion": 2000,
   "warm_completion": 250,
   "incremental_edit_diagnostics": 1000,
-  "post_edit_completion": 1000
+  "post_edit_completion": 1000,
+  "signature_help": 1000
 }

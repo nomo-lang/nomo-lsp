@@ -140,6 +140,9 @@ def main() -> int:
             initialize_ms = elapsed_ms(started)
             if "error" in initialize:
                 raise RuntimeError(f"initialize failed: {initialize['error']}")
+            capabilities = initialize.get("result", {}).get("capabilities", {})
+            if not capabilities.get("signatureHelpProvider"):
+                raise RuntimeError("nomo-lsp did not advertise signature help")
             session.send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
             started = time.perf_counter()
@@ -208,8 +211,11 @@ def main() -> int:
 
             valid_text = (
                 "package lsp\n\n"
+                "fn add(left: i64, right: i64) -> i64 {\n"
+                "    return left + right\n"
+                "}\n\n"
                 "fn main() {\n"
-                "    let value: i64 = 1\n"
+                "    let value: i64 = add(1, 2)\n"
                 "}\n"
             )
             started = time.perf_counter()
@@ -253,6 +259,31 @@ def main() -> int:
             if not (post_edit_completion.get("result") or []):
                 raise RuntimeError("nomo-lsp returned no completion items after an edit")
 
+            started = time.perf_counter()
+            session.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "textDocument/signatureHelp",
+                    "params": {
+                        "textDocument": {"uri": source_uri},
+                        "position": {"line": 7, "character": 29},
+                    },
+                }
+            )
+            signature_help = session.wait_for(
+                lambda message: message.get("id") == 7, 10.0
+            )
+            signature_help_ms = elapsed_ms(started)
+            signature_result = signature_help.get("result") or {}
+            signatures = signature_result.get("signatures") or []
+            if not signatures:
+                raise RuntimeError("nomo-lsp returned no signature help")
+            if signatures[0].get("label") != "fn add(left: i64, right: i64) -> i64":
+                raise RuntimeError("nomo-lsp returned a non-canonical signature")
+            if signature_result.get("activeParameter") != 1:
+                raise RuntimeError("nomo-lsp returned the wrong active signature parameter")
+
             session.send(
                 {
                     "jsonrpc": "2.0",
@@ -281,6 +312,7 @@ def main() -> int:
                     "warm_completion": warm_completion_ms,
                     "incremental_edit_diagnostics": incremental_edit_diagnostics_ms,
                     "post_edit_completion": post_edit_completion_ms,
+                    "signature_help": signature_help_ms,
                 },
                 "diagnostic_count": len(diagnostic_items),
                 "completion_count": len(completion_items),

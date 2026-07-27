@@ -382,7 +382,7 @@ mod tests {
     fn definition_returns_function_declaration_location() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let text = "package app\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -418,7 +418,7 @@ mod tests {
     fn definition_returns_type_declaration_location() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+        let text = "package app\n\npub struct User {\n    email: string\n}\n\nfn main() {\n    let user: User = User { email: \"hi\" }\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -453,7 +453,7 @@ mod tests {
     fn definition_returns_field_declaration_location() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+        let text = "package app\n\npub struct User {\n    email: string\n}\n\nfn main() {\n    let user: User = User { email: \"hi\" }\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -488,7 +488,7 @@ mod tests {
     fn definition_uses_receiver_type_for_same_name_fields_without_manifest() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nfn read(user: User) -> string {\n    return user.name\n}\n";
+        let text = "package app\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nfn read(user: User) -> string {\n    return user.name\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -512,7 +512,7 @@ mod tests {
     fn definition_returns_enum_variant_declaration_location() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nenum Status {\n    Ok\n    Err(string)\n}\n\nfn main() -> void {\n    let status: Status = Status.Err(\"bad\")\n}\n";
+        let text = "package app\n\nenum Status {\n    Ok\n    Err(string)\n}\n\nfn main() {\n    let status: Status = Status.Err(\"bad\")\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -547,7 +547,7 @@ mod tests {
     fn definition_returns_local_binding_declaration() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
+        let text = "package app\n\nfn main() {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let definition = definition_for_text(
             &path,
@@ -582,7 +582,7 @@ mod tests {
     fn references_return_current_document_identifier_locations() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let first: i64 = add(1, 2)\n    let second: i64 = add(first, 3)\n}\n";
+        let text = "package app\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n    let first: i64 = add(1, 2)\n    let second: i64 = add(first, 3)\n}\n";
 
         let references = references_for_text(
             &path,
@@ -642,7 +642,7 @@ mod tests {
     fn references_can_exclude_declaration() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nstruct User {\n    email: string\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n}\n";
+        let text = "package app\n\nstruct User {\n    email: string\n}\n\nfn main() {\n    let user: User = User { email: \"hi\" }\n}\n";
 
         let references = references_for_text(
             &path,
@@ -690,7 +690,7 @@ mod tests {
     fn references_return_local_binding_locations() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
+        let text = "package app\n\nfn main() {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let references = references_for_text(
             &path,
@@ -713,7 +713,7 @@ mod tests {
     fn rename_returns_current_document_workspace_edit() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let text = "package app\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
 
         let edit = rename_for_document(
             &path,
@@ -754,7 +754,7 @@ mod tests {
     fn rename_excludes_shadowing_parameter_references() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn value() -> i64 {\n    return 1\n}\n\nfn consume(value: i64) -> i64 {\n    return value\n}\n\nfn main() -> void {\n    let result: i64 = value()\n}\n";
+        let text = "package app\n\nfn value() -> i64 {\n    return 1\n}\n\nfn consume(value: i64) -> i64 {\n    return value\n}\n\nfn main() {\n    let result: i64 = value()\n}\n";
 
         let edit = rename_for_document(
             &path,
@@ -780,7 +780,7 @@ mod tests {
     fn rename_rejects_invalid_identifier() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+        let text = "package app\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
 
         let edit = rename_for_document(
             &path,
@@ -801,7 +801,7 @@ mod tests {
     fn rename_rejects_top_level_declaration_collision() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn first() -> i64 {\n    return 1\n}\n\nfn second() -> i64 {\n    return 2\n}\n\nfn main() -> void {\n    let value: i64 = first()\n}\n";
+        let text = "package app\n\nfn first() -> i64 {\n    return 1\n}\n\nfn second() -> i64 {\n    return 2\n}\n\nfn main() {\n    let value: i64 = first()\n}\n";
 
         let edit = rename_for_document(
             &path,
@@ -822,7 +822,8 @@ mod tests {
     fn rename_rejects_local_binding_collision() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let first: i64 = 1\n    let second: i64 = first\n}\n";
+        let text =
+            "package app\n\nfn main() {\n    let first: i64 = 1\n    let second: i64 = first\n}\n";
 
         let edit = rename_for_document(
             &path,
@@ -843,7 +844,7 @@ mod tests {
     fn prepare_rename_returns_current_identifier_range() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let text = "package app\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
 
         let prepared = prepare_rename_for_document(
             &path,
@@ -885,11 +886,11 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
 
@@ -925,7 +926,7 @@ mod tests {
     fn prepare_rename_accepts_local_binding() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
+        let text = "package app\n\nfn main() {\n    let message: string = \"hi\"\n    io.println(message)\n}\n";
 
         let prepared = prepare_rename_for_document(
             &path,
@@ -967,11 +968,11 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
 
@@ -1020,11 +1021,11 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\npub fn add() -> i64 {\n    return 1\n}\n",
+            "package hello.math\n\npub fn add() -> i64 {\n    return 1\n}\n",
         )
         .unwrap();
 
@@ -1053,7 +1054,7 @@ mod tests {
                 },
                 end: Position {
                     line: 0,
-                    character: 16,
+                    character: 18,
                 },
             }
         );
@@ -1072,7 +1073,7 @@ mod tests {
         )
         .unwrap();
         let main = project.join("src/main.nomo");
-        let main_source = "package app.main\n\nimport std.string.split\n\nfn main() -> void {\n}\n";
+        let main_source = "package hello\n\nimport std.string.split\n\nfn main() {\n}\n";
         fs::write(&main, main_source).unwrap();
 
         let definition = definition_for_document(
@@ -1120,7 +1121,7 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let dep_module = dependency.join("src/path/main.nomo");
-        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n}\n";
+        let main_source = "package hello\n\nimport local_utils.path\n\nfn main() {\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &dep_module,
@@ -1170,7 +1171,7 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let dep_module = dependency.join("src/path.nomo");
-        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport local_utils.path\n\nfn main() {\n    let total: i64 = join(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &dep_module,
@@ -1226,15 +1227,15 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
+            "package hello.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
         )
         .unwrap();
         let overlay =
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
 
         let references = references_for_document(
             &main,
@@ -1281,11 +1282,11 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         let main_uri = Url::from_file_path(&main).unwrap();
@@ -1333,7 +1334,7 @@ mod tests {
         let root = temp_test_root("workspace-references");
         let (core_main, cli_main, core_source) = setup_workspace(
             &root,
-            "package cli.main\n\nimport core.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+            "package cli\n\nimport core\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n",
         );
 
         let references = references_for_document(
@@ -1373,7 +1374,7 @@ mod tests {
         let root = temp_test_root("workspace-rename");
         let (core_main, cli_main, core_source) = setup_workspace(
             &root,
-            "package cli.main\n\nimport core.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+            "package cli\n\nimport core\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n",
         );
         let core_uri = Url::from_file_path(&core_main).unwrap();
         let cli_uri = Url::from_file_path(&cli_main).unwrap();
@@ -1408,7 +1409,7 @@ mod tests {
         let root = temp_test_root("workspace-rename-dependent-collision");
         let (core_main, _, core_source) = setup_workspace(
             &root,
-            "package cli.main\n\nimport core.main\n\nfn sum(a: i64, b: i64) -> i64 {\n    return a - b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n",
+            "package cli\n\nimport core\n\nfn sum(a: i64, b: i64) -> i64 {\n    return a - b\n}\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n",
         );
 
         let edit = rename_for_document(
@@ -1448,11 +1449,12 @@ mod tests {
         .unwrap();
         let app_main = app.join("src/main.nomo");
         let external_main = external.join("src/main.nomo");
-        let app_source = "package app.main\n\nimport external.main\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let app_source =
+            "package app\n\nimport external\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&app_main, app_source).unwrap();
         fs::write(
             &external_main,
-            "package external.main\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package external\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
 
@@ -1484,7 +1486,7 @@ mod tests {
         )
         .unwrap();
         let main = project.join("src/main.nomo");
-        let source = "package app.main\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nimpl User {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nimpl Team {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nfn main() -> void {\n    let user = User { name: \"Ada\" }\n    let team = Team { name: \"Core\" }\n    let user_name: string = user.name\n    let team_name: string = team.name\n}\n";
+        let source = "package hello\n\nstruct User {\n    name: string\n}\n\nstruct Team {\n    name: string\n}\n\nimpl User {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nimpl Team {\n    fn label(self) -> string {\n        return self.name\n    }\n}\n\nfn main() {\n    let user = User { name: \"Ada\" }\n    let team = Team { name: \"Core\" }\n    let user_name: string = user.name\n    let team_name: string = team.name\n}\n";
         fs::write(&main, source).unwrap();
         let uri = Url::from_file_path(&main).unwrap();
 
@@ -1515,7 +1517,7 @@ mod tests {
     }
 
     fn setup_workspace(root: &Path, cli_source: &str) -> (PathBuf, PathBuf, &'static str) {
-        const CORE_SOURCE: &str = "package core.main\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n}\n";
+        const CORE_SOURCE: &str = "package core\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n}\n";
         reset_dir(root);
         let core = root.join("packages/core");
         let cli = root.join("apps/cli");

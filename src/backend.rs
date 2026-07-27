@@ -646,12 +646,7 @@ fn completion_for_document(
         return items;
     }
     if position.is_some_and(|position| is_import_completion_position(text, position)) {
-        items.extend(import_completion_items(
-            path,
-            text,
-            source_overrides,
-            &mut seen,
-        ));
+        items.extend(import_completion_items(path, source_overrides, &mut seen));
         return items;
     }
 
@@ -737,7 +732,6 @@ fn is_import_completion_position(text: &str, position: Position) -> bool {
 
 fn import_completion_items(
     path: &Path,
-    text: &str,
     source_overrides: &[(PathBuf, String)],
     seen: &mut BTreeSet<String>,
 ) -> Vec<CompletionItem> {
@@ -746,25 +740,23 @@ fn import_completion_items(
         .map(|item| (item, CompletionItemKind::MODULE))
         .collect::<Vec<_>>();
 
-    if let Ok(project) = nomo::project::discover_project(path) {
-        if let Some(local_root) = local_import_root(text) {
+    if let Ok(project) = nomo::project::discover_project(path)
+        && let Ok(context) = nomo::project::project_module_context(&project)
+    {
+        imports.extend(module_imports_from_source_root(
+            &context.local_source_root,
+            &context.local_identity.module_root,
+            source_overrides,
+        ));
+        for alias in &context.external_import_roots {
+            imports.push((alias.clone(), CompletionItemKind::MODULE));
+        }
+        for module in &context.external_modules {
             imports.extend(module_imports_from_source_root(
-                &project.root.join("src"),
-                &local_root,
+                &module.source_root,
+                &module.import_root,
                 source_overrides,
             ));
-        }
-        if let Ok(context) = nomo::project::project_module_context(&project) {
-            for alias in &context.external_import_roots {
-                imports.push((alias.clone(), CompletionItemKind::MODULE));
-            }
-            for module in &context.external_modules {
-                imports.extend(module_imports_from_source_root(
-                    &module.source_root,
-                    &module.import_root,
-                    source_overrides,
-                ));
-            }
         }
     }
 
@@ -780,18 +772,6 @@ fn import_completion_items(
             })
         })
         .collect()
-}
-
-fn local_import_root(text: &str) -> Option<String> {
-    text.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let package = trimmed.strip_prefix("package ")?;
-        package
-            .split('.')
-            .next()
-            .filter(|segment| !segment.is_empty())
-            .map(|segment| segment.to_string())
-    })
 }
 
 fn module_imports_from_source_root(
@@ -1008,7 +988,6 @@ fn code_actions_for_text(
         path,
         text,
         &uri,
-        module_source_overrides,
         &diagnostic,
         &lsp_diagnostic,
     ));
@@ -1019,7 +998,6 @@ fn module_package_code_actions(
     path: &Path,
     text: &str,
     uri: &Url,
-    module_source_overrides: &[(PathBuf, String)],
     diagnostic: &NomoDiagnostic,
     lsp_diagnostic: &tower_lsp::lsp_types::Diagnostic,
 ) -> Vec<CodeActionOrCommand> {
@@ -1031,36 +1009,9 @@ fn module_package_code_actions(
     let Some(package) = package_declaration(text) else {
         return Vec::new();
     };
-    let Some(expected) = expected_package_for_current_file(path, text, module_source_overrides)
-    else {
-        return Vec::new();
-    };
-    if package.name == expected {
-        return Vec::new();
-    }
-
-    let mut actions = vec![CodeActionOrCommand::CodeAction(CodeAction {
-        title: format!("update package declaration to match module `{expected}`"),
-        kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![lsp_diagnostic.clone()]),
-        edit: Some(WorkspaceEdit {
-            changes: Some(HashMap::from([(
-                uri.clone(),
-                vec![TextEdit {
-                    range: package.range,
-                    new_text: expected,
-                }],
-            )])),
-            document_changes: None,
-            change_annotations: None,
-        }),
-        command: None,
-        is_preferred: Some(true),
-        disabled: None,
-        data: None,
-    })];
-    if let Some(target_path) =
-        module_file_path_for_package(path, text, module_source_overrides, &package.name)
+    let mut actions = Vec::new();
+    if diagnostic.code == "E0904"
+        && let Some(target_path) = module_file_path_for_package(path, &package.name)
         && normalize_path(&target_path) != normalize_path(path)
         && !target_path.exists()
         && target_path.parent().is_some_and(Path::is_dir)
@@ -1116,14 +1067,12 @@ fn add_import_code_actions(
     let Ok(project) = nomo::project::discover_project(path) else {
         return Vec::new();
     };
-    let Some(local_root) = local_import_root(text) else {
-        return Vec::new();
-    };
     let current_imports = imported_paths(text);
     let Ok(context) = nomo::project::project_module_context(&project) else {
         return Vec::new();
     };
-    let source_roots = std::iter::once((local_root.as_str(), context.local_source_root.as_path()))
+    let local_root = context.local_identity.module_root.as_str();
+    let source_roots = std::iter::once((local_root, context.local_source_root.as_path()))
         .chain(
             context
                 .external_modules
@@ -1286,7 +1235,6 @@ struct PackageDeclaration {
     column: usize,
     length: usize,
     line_text: String,
-    range: Range,
 }
 
 fn package_declaration(text: &str) -> Option<PackageDeclaration> {
@@ -1300,40 +1248,17 @@ fn package_declaration(text: &str) -> Option<PackageDeclaration> {
                 .split_whitespace()
                 .next()
                 .filter(|name| !name.is_empty())?;
-            let name_end = name_start + name.len();
-            let character_start = source_line[..name_start]
-                .chars()
-                .map(char::len_utf16)
-                .sum::<usize>();
-            let character_end = source_line[..name_end]
-                .chars()
-                .map(char::len_utf16)
-                .sum::<usize>();
             Some(PackageDeclaration {
                 name: name.to_string(),
                 line: line_index + 1,
                 column: name_start + 1,
                 length: name.len(),
                 line_text: source_line.to_string(),
-                range: Range {
-                    start: Position {
-                        line: line_index as u32,
-                        character: character_start as u32,
-                    },
-                    end: Position {
-                        line: line_index as u32,
-                        character: character_end as u32,
-                    },
-                },
             })
         })
 }
 
-fn expected_package_for_current_file(
-    path: &Path,
-    text: &str,
-    module_source_overrides: &[(PathBuf, String)],
-) -> Option<String> {
+fn expected_package_for_current_file(path: &Path) -> Option<String> {
     let project = nomo::project::discover_project(path).ok()?;
     let context = nomo::project::project_module_context(&project).ok()?;
     let source_root = normalize_path(&context.local_source_root);
@@ -1341,21 +1266,19 @@ fn expected_package_for_current_file(
     if !normalized_path.starts_with(&source_root) {
         return None;
     }
-    let local_root = project_main_import_root(&project, module_source_overrides)
-        .or_else(|| local_import_root(text))?;
-    module_import_from_file(&source_root, &local_root, &normalized_path)
+    nomo::expected_module_package(
+        &context.local_source_root,
+        &context.local_identity.module_root,
+        path,
+    )
+    .ok()
+    .map(|segments| segments.join("."))
 }
 
-fn module_file_path_for_package(
-    path: &Path,
-    text: &str,
-    module_source_overrides: &[(PathBuf, String)],
-    package: &str,
-) -> Option<PathBuf> {
+fn module_file_path_for_package(path: &Path, package: &str) -> Option<PathBuf> {
     let project = nomo::project::discover_project(path).ok()?;
     let context = nomo::project::project_module_context(&project).ok()?;
-    let local_root = project_main_import_root(&project, module_source_overrides)
-        .or_else(|| local_import_root(text))?;
+    let local_root = context.local_identity.module_root;
     let parts = package.split('.').collect::<Vec<_>>();
     if parts.first().copied() != Some(local_root.as_str())
         || parts.iter().any(|part| part.is_empty())
@@ -1374,27 +1297,19 @@ fn module_file_path_for_package(
     Some(target)
 }
 
-fn project_main_import_root(
-    project: &nomo::project::Project,
-    module_source_overrides: &[(PathBuf, String)],
-) -> Option<String> {
-    let main = normalize_path(&project.main);
-    let main_source = module_source_overrides
-        .iter()
-        .find(|(path, _)| normalize_path(path) == main)
-        .map(|(_, source)| source.clone())
-        .or_else(|| std::fs::read_to_string(&project.main).ok())?;
-    local_import_root(&main_source)
-}
-
 fn diagnostics_for_text(
     path: &Path,
     text: &str,
     module_source_overrides: &[(PathBuf, String)],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    first_diagnostic_for_text(path, text, module_source_overrides)
-        .map(|diag| vec![to_lsp_diagnostic(&diag)])
-        .unwrap_or_default()
+    let mut diagnostics = Vec::new();
+    if let Err(diagnostic) = compiler_diagnostic_for_text(path, text, module_source_overrides) {
+        diagnostics.push(diagnostic);
+    }
+    if let Some(diagnostic) = legacy_module_package_diagnostic(path, text) {
+        diagnostics.push(diagnostic);
+    }
+    diagnostics.iter().map(to_lsp_diagnostic).collect()
 }
 
 fn first_diagnostic_for_text(
@@ -1402,29 +1317,49 @@ fn first_diagnostic_for_text(
     text: &str,
     module_source_overrides: &[(PathBuf, String)],
 ) -> Option<NomoDiagnostic> {
-    module_package_mismatch_diagnostic(path, text, module_source_overrides)
-        .or_else(|| compiler_diagnostic_for_text(path, text, module_source_overrides).err())
+    compiler_diagnostic_for_text(path, text, module_source_overrides)
+        .err()
+        .or_else(|| legacy_module_package_diagnostic(path, text))
 }
 
-fn module_package_mismatch_diagnostic(
-    path: &Path,
-    text: &str,
-    module_source_overrides: &[(PathBuf, String)],
-) -> Option<NomoDiagnostic> {
+fn legacy_module_package_diagnostic(path: &Path, text: &str) -> Option<NomoDiagnostic> {
     let package = package_declaration(text)?;
-    let expected = expected_package_for_current_file(path, text, module_source_overrides)?;
-    if package.name == expected {
+    let expected = expected_package_for_current_file(path)?;
+    let project = nomo::project::discover_project(path).ok()?;
+    let context = nomo::project::project_module_context(&project).ok()?;
+    let expected_segments = expected.split('.').collect::<Vec<_>>();
+    let actual_segments = package.name.split('.').collect::<Vec<_>>();
+    let is_legacy = if expected_segments.len() == 1 {
+        actual_segments == ["app", "main"]
+            || actual_segments == [context.local_identity.module_root.as_str(), "main"]
+    } else {
+        actual_segments.first().copied() == Some("app")
+            && actual_segments[1..] == expected_segments[1..]
+    };
+    if !is_legacy {
         return None;
     }
-    Some(NomoDiagnostic::new(
-        "E0904",
-        format!("module `{}` declares package `{}`", expected, package.name),
+    let mut diagnostic = NomoDiagnostic::warning(
+        "W0904",
+        format!(
+            "legacy module declaration `package {}` is accepted for one development snapshot; use `package {expected}`",
+            package.name
+        ),
         path,
         package.line,
         package.column,
         package.length,
         package.line_text,
-    ))
+    )
+    .with_expected_found(expected.clone(), package.name.clone());
+    diagnostic.suggestions.push(nomo::Suggestion {
+        line: package.line,
+        column: package.column,
+        length: package.length,
+        text: expected.clone(),
+        description: format!("replace the declaration with `package {expected}`"),
+    });
+    Some(diagnostic)
 }
 
 fn compiler_diagnostic_for_text(
@@ -1434,10 +1369,11 @@ fn compiler_diagnostic_for_text(
 ) -> std::result::Result<(), NomoDiagnostic> {
     if let Ok(project) = nomo::project::discover_project(path) {
         match nomo::project::project_module_context(&project) {
-            Ok(context) => nomo::check_source_text_with_project_modules_and_overrides(
+            Ok(context) => nomo::check_source_text_with_module_identity_and_overrides(
                 path,
                 text,
-                Some(&context.local_source_root),
+                &context.local_source_root,
+                &context.local_identity,
                 &context.external_import_roots,
                 &context.external_modules,
                 module_source_overrides,
@@ -1476,7 +1412,11 @@ fn to_lsp_diagnostic(diag: &NomoDiagnostic) -> tower_lsp::lsp_types::Diagnostic 
                 character: end_char,
             },
         },
-        severity: Some(DiagnosticSeverity::ERROR),
+        severity: Some(if diag.severity == "warning" {
+            DiagnosticSeverity::WARNING
+        } else {
+            DiagnosticSeverity::ERROR
+        }),
         code: Some(NumberOrString::String(diag.code.to_string())),
         code_description: diagnostic_code_description(diag.code),
         source: Some("nomo".to_string()),
@@ -1523,7 +1463,7 @@ mod tests {
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+            "package hello\n\nimport json.parser\n\nfn main() {\n}\n",
             &[],
         );
 
@@ -1546,7 +1486,7 @@ mod tests {
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport std.io\nimport std.path\n\nfn main() -> void {\n    io.println(path.basename(\"/tmp/demo.txt\"))\n}\n",
+            "package hello\n\nimport std.io\nimport std.path\n\nfn main() {\n    io.println(path.basename(\"/tmp/demo.txt\"))\n}\n",
             &[],
         );
 
@@ -1567,14 +1507,14 @@ mod tests {
         .unwrap();
         fs::write(
             project.join("src/math.nomo"),
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         let source = project.join("src/main.nomo");
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n",
+            "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(40, 2)\n}\n",
             &[],
         );
 
@@ -1596,17 +1536,17 @@ mod tests {
         let module_path = project.join("src/math.nomo");
         fs::write(
             &module_path,
-            "package app.math\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\nfn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         let source = project.join("src/main.nomo");
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n",
+            "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(40, 2)\n}\n",
             &[(
                 module_path,
-                "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n"
+                "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n"
                     .to_string(),
             )],
         );
@@ -1628,7 +1568,7 @@ mod tests {
             "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
         )
         .unwrap();
-        fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
+        fs::write(dependency.join("src/main.nomo"), "package utils\n").unwrap();
         fs::write(
             dependency.join("src/path.nomo"),
             "package utils.path\n\npub fn join(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
@@ -1643,7 +1583,7 @@ mod tests {
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(40, 2)\n}\n",
+            "package hello\n\nimport local_utils.path\n\nfn main() {\n    let total: i64 = join(40, 2)\n}\n",
             &[],
         );
 
@@ -1813,15 +1753,15 @@ mod tests {
         )
         .unwrap();
         let main = project.join("src/main.nomo");
-        let source = "package app.main\n\nimport \n\nfn main() -> void {\n}\n";
+        let source = "package hello\n\nimport \n\nfn main() {\n}\n";
         fs::write(&main, source).unwrap();
-        fs::write(project.join("src/math.nomo"), "package app.math\n").unwrap();
+        fs::write(project.join("src/math.nomo"), "package hello.math\n").unwrap();
         fs::write(
             project.join("src/math/extra.nomo"),
-            "package app.math.extra\n",
+            "package hello.math.extra\n",
         )
         .unwrap();
-        fs::write(project.join("src/math/main.nomo"), "package app.math\n").unwrap();
+        fs::write(project.join("src/math/main.nomo"), "package hello.math\n").unwrap();
 
         let items = completion_for_document(
             &main,
@@ -1957,8 +1897,8 @@ mod tests {
                 .any(|item| item.label == "std.time.format_duration")
         );
         assert!(items.iter().any(|item| item.label == "std.time.sleep"));
-        assert!(items.iter().any(|item| item.label == "app.math"));
-        assert!(items.iter().any(|item| item.label == "app.math.extra"));
+        assert!(items.iter().any(|item| item.label == "hello.math"));
+        assert!(items.iter().any(|item| item.label == "hello.math.extra"));
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -2056,11 +1996,11 @@ mod tests {
         .unwrap();
         let main_path = project.join("src/main.nomo");
         let math_path = project.join("src/math.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let total: i64 = add(40, 2)\n}\n";
+        let text = "package hello\n\nfn main() {\n    let total: i64 = add(40, 2)\n}\n";
         fs::write(&main_path, text).unwrap();
         fs::write(
             math_path,
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         let uri = Url::from_file_path(&main_path).unwrap();
@@ -2073,7 +2013,7 @@ mod tests {
         let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
             panic!("expected code action");
         };
-        assert_eq!(action.title, "add `import app.math` to use `add`");
+        assert_eq!(action.title, "add `import hello.math` to use `add`");
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
         let edits = changes.get(&uri).unwrap();
@@ -2090,7 +2030,7 @@ mod tests {
                         character: 0,
                     },
                 },
-                new_text: "import app.math\n".to_string(),
+                new_text: "import hello.math\n".to_string(),
             }]
         );
         fs::remove_dir_all(&root).unwrap();
@@ -2195,10 +2135,10 @@ mod tests {
             "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
         )
         .unwrap();
-        fs::write(project.join("src/main.nomo"), "package app.main\n").unwrap();
+        fs::write(project.join("src/main.nomo"), "package hello\n").unwrap();
         let module_path = project.join("src/math.nomo");
         let text =
-            "package app.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+            "package hello.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
 
         let diagnostics = diagnostics_for_text(&module_path, text, &[]);
 
@@ -2207,8 +2147,8 @@ mod tests {
             diagnostics[0].code,
             Some(NumberOrString::String("E0904".to_string()))
         );
-        assert!(diagnostics[0].message.contains("app.math"));
-        assert!(diagnostics[0].message.contains("app.other"));
+        assert!(diagnostics[0].message.contains("hello.math"));
+        assert!(diagnostics[0].message.contains("hello.other"));
         assert_eq!(
             diagnostics[0].range,
             Range {
@@ -2218,10 +2158,62 @@ mod tests {
                 },
                 end: Position {
                     line: 0,
-                    character: 17,
+                    character: 19,
                 },
             }
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_module_root_is_a_warning_with_a_canonical_quick_fix() {
+        let root = temp_test_root("legacy-module-root-warning");
+        reset_dir(&root);
+        let project = root.join("hello-world");
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("nomo.toml"),
+            "[package]\nnamespace = \"fynn\"\nname = \"hello-world\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+        )
+        .unwrap();
+        let main_path = project.join("src/main.nomo");
+        let text = "package app.main\n\nfn main() {\n}\n";
+        fs::write(&main_path, text).unwrap();
+        let uri = Url::from_file_path(&main_path).unwrap();
+
+        let diagnostics = diagnostics_for_text(&main_path, text, &[]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("W0904".to_string()))
+        );
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(diagnostics[0].message.contains("package hello_world"));
+        let actions =
+            code_actions_for_text(&main_path, text, uri.clone(), &[], &diagnostics).unwrap();
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(
+            action.title,
+            "replace the declaration with `package hello_world`"
+        );
+        let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        assert_eq!(changes.get(&uri).unwrap()[0].new_text, "hello_world");
+
+        let invalid =
+            "package app.main\n\nfn main() {\n    let value: i32 = \"not an integer\"\n}\n";
+        let diagnostics = diagnostics_for_text(&main_path, invalid, &[]);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            diagnostics[1].code,
+            Some(NumberOrString::String("W0904".to_string()))
+        );
+        assert_eq!(diagnostics[1].severity, Some(DiagnosticSeverity::WARNING));
+
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -2236,10 +2228,10 @@ mod tests {
             "[package]\nnamespace = \"fynn\"\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
         )
         .unwrap();
-        fs::write(project.join("src/main.nomo"), "package app.main\n").unwrap();
+        fs::write(project.join("src/main.nomo"), "package hello\n").unwrap();
         let module_path = project.join("src/math.nomo");
         let text =
-            "package app.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+            "package hello.other\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
         let uri = Url::from_file_path(&module_path).unwrap();
         let diagnostics = diagnostics_for_text(&module_path, text, &[]);
 
@@ -2252,7 +2244,7 @@ mod tests {
         };
         assert_eq!(
             action.title,
-            "update package declaration to match module `app.math`"
+            "replace the declaration with `package hello.math`"
         );
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
@@ -2267,10 +2259,10 @@ mod tests {
                     },
                     end: Position {
                         line: 0,
-                        character: 17,
+                        character: 19,
                     },
                 },
-                new_text: "app.math".to_string(),
+                new_text: "hello.math".to_string(),
             }]
         );
         let CodeActionOrCommand::CodeAction(action) = &actions[1] else {
@@ -2278,7 +2270,7 @@ mod tests {
         };
         assert_eq!(
             action.title,
-            "rename module file to match package `app.other`"
+            "rename module file to match package `hello.other`"
         );
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         let Some(DocumentChanges::Operations(operations)) =

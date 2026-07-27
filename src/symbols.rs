@@ -490,6 +490,43 @@ mod tests {
     }
 
     #[test]
+    fn document_symbol_signatures_omit_void_but_keep_callable_returns() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app.main\n\nstruct Worker {\n    id: i64\n}\n\ninterface Lifecycle {\n    fn stop(self) -> void\n}\n\nextern \"C\" {\n    fn tick() -> void\n}\n\nimpl Worker {\n    fn reset(self) -> void {\n    }\n}\n\nsuspend fn wait() -> void {\n}\n\nfn install(callback: task fn(string) -> void) -> void {\n}\n";
+
+        let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
+        else {
+            panic!("expected document symbols");
+        };
+        let detail = |name: &str| {
+            symbols
+                .iter()
+                .find(|symbol| symbol.name == name)
+                .and_then(|symbol| symbol.detail.as_deref())
+        };
+        assert_eq!(detail("tick"), Some("extern \"C\" fn tick()"));
+        assert_eq!(detail("reset"), Some("fn Worker.reset(self: Worker)"));
+        assert_eq!(detail("wait"), Some("suspend fn wait()"));
+        assert_eq!(
+            detail("install"),
+            Some("fn install(callback: task fn(string) -> void)")
+        );
+        let lifecycle = symbols
+            .iter()
+            .find(|symbol| symbol.name == "Lifecycle")
+            .expect("Lifecycle symbol");
+        let stop = lifecycle
+            .children
+            .as_ref()
+            .and_then(|children| children.iter().find(|symbol| symbol.name == "stop"))
+            .expect("Lifecycle.stop symbol");
+        assert_eq!(
+            stop.detail.as_deref(),
+            Some("fn Lifecycle.stop(self: Self)")
+        );
+    }
+
+    #[test]
     fn document_symbols_return_none_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 

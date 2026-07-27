@@ -158,14 +158,14 @@ mod tests {
         );
         assert_eq!(
             edits[0].new_text,
-            "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n"
+            "package app.main\n\nfn main() {\n    let message: string = \"hi\"\n}\n"
         );
     }
 
     #[test]
     fn formatting_returns_empty_edits_for_already_formatted_text() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app.main\n\nfn main() {\n    let message: string = \"hi\"\n}\n";
 
         let edits = formatting_edits_for_text(&path, text).unwrap();
 

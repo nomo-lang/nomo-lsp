@@ -94,9 +94,12 @@ fn module_definition_for_document(
         let range = module_definition_range(&source_path);
         return Some(Location { uri, range });
     }
-    let local_root = local_import_root(text)?;
     let context = nomo::project::project_module_context(project).ok()?;
-    let source_path = nomo::project::resolve_module_source_path(&context, &local_root, &import)?;
+    let source_path = nomo::project::resolve_module_source_path(
+        &context,
+        &context.local_identity.module_root,
+        &import,
+    )?;
     let uri = Url::from_file_path(&source_path).ok()?;
     let range = module_definition_range(&source_path);
     Some(Location { uri, range })
@@ -122,18 +125,6 @@ fn import_path_at_position(text: &str, position: Position) -> Option<Vec<String>
         .map(|segment| segment.to_string())
         .collect::<Vec<_>>();
     (parts.len() >= 2).then_some(parts)
-}
-
-fn local_import_root(text: &str) -> Option<String> {
-    text.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let package = trimmed.strip_prefix("package ")?;
-        package
-            .split('.')
-            .next()
-            .filter(|segment| !segment.is_empty())
-            .map(|segment| segment.to_string())
-    })
 }
 
 fn module_definition_range(path: &Path) -> Range {

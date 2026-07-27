@@ -151,7 +151,8 @@ mod tests {
         let HoverContents::Markup(markup) = hover.contents else {
             panic!("expected markup hover");
         };
-        assert!(markup.value.contains("pub fn nested() -> void"));
+        assert!(markup.value.contains("pub fn nested()"));
+        assert!(!markup.value.contains("pub fn nested() -> void"));
         assert!(markup.value.contains("Outer docs."));
         assert!(markup.value.contains("/* Nested docs. */"));
         assert!(markup.value.contains("Still outer."));

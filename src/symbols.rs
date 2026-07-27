@@ -259,7 +259,7 @@ mod tests {
         .unwrap();
         fs::write(
             project.join("src/main.nomo"),
-            "package app.main\n\npub struct User {\n    email: string\n}\n\npub fn make_user() -> User {\n    return User { email: \"hi\" }\n}\n",
+            "package hello\n\npub struct User {\n    email: string\n}\n\npub fn make_user() -> User {\n    return User { email: \"hi\" }\n}\n",
         )
         .unwrap();
 
@@ -303,7 +303,7 @@ mod tests {
         .unwrap();
         fs::write(
             app.join("src/main.nomo"),
-            "package app.main\n\npub fn run_cli() -> void {\n}\n",
+            "package cli\n\npub fn run_cli() {\n}\n",
         )
         .unwrap();
         fs::write(
@@ -313,7 +313,7 @@ mod tests {
         .unwrap();
         fs::write(
             core.join("src/main.nomo"),
-            "package core.main\n\npub fn run_core() -> void {\n}\n",
+            "package core\n\npub fn run_core() {\n}\n",
         )
         .unwrap();
 
@@ -344,7 +344,7 @@ mod tests {
         .unwrap();
         fs::write(
             project.join("src/main.nomo"),
-            "package app.main\n\nfn main() -> void {\n}\n",
+            "package hello\n\nfn main() {\n}\n",
         )
         .unwrap();
         fs::write(
@@ -399,15 +399,15 @@ mod tests {
         let module = project.join("src/math.nomo");
         fs::write(
             project.join("src/main.nomo"),
-            "package app.main\n\nfn main() -> void {\n}\n",
+            "package hello\n\nfn main() {\n}\n",
         )
         .unwrap();
         fs::write(
             &module,
-            "package app.math\n\npub fn stale_name() -> i64 {\n    return 1\n}\n",
+            "package hello.math\n\npub fn stale_name() -> i64 {\n    return 1\n}\n",
         )
         .unwrap();
-        let overlay = "package app.math\n\npub fn fresh_name() -> i64 {\n    return 1\n}\n";
+        let overlay = "package hello.math\n\npub fn fresh_name() -> i64 {\n    return 1\n}\n";
 
         let symbols = workspace_symbols_for_roots(
             std::slice::from_ref(&project),
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn document_symbols_nest_fields_and_variants_under_parent_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\npub interface Display {\n    fn to_string(self) -> string\n}\n\nconst MAX: i64 = 10\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n}\n";
+        let text = "package hello\n\npub struct User {\n    email: string\n}\n\nenum Status {\n    Ready\n    Done(string)\n}\n\npub interface Display {\n    fn to_string(self) -> string\n}\n\nconst MAX: i64 = 10\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nimpl User {\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() {\n}\n";
 
         let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
         else {
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn document_symbol_signatures_omit_void_but_keep_callable_returns() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nstruct Worker {\n    id: i64\n}\n\ninterface Lifecycle {\n    fn stop(self) -> void\n}\n\nextern \"C\" {\n    fn tick() -> void\n}\n\nimpl Worker {\n    fn reset(self) -> void {\n    }\n}\n\nsuspend fn wait() -> void {\n}\n\nfn install(callback: task fn(string) -> void) -> void {\n}\n";
+        let text = "package app\n\nstruct Worker {\n    id: i64\n}\n\ninterface Lifecycle {\n    fn stop(self)\n}\n\nextern \"C\" {\n    fn tick()\n}\n\nimpl Worker {\n    fn reset(self) {\n    }\n}\n\nsuspend fn wait() {\n}\n\nfn install(callback: task fn(string) -> void) {\n}\n";
 
         let Some(DocumentSymbolResponse::Nested(symbols)) = document_symbols_for_text(&path, text)
         else {
@@ -530,7 +530,7 @@ mod tests {
     fn document_symbols_return_none_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 
-        let symbols = document_symbols_for_text(&path, "package app.main\n\nfn main( {\n");
+        let symbols = document_symbols_for_text(&path, "package app\n\nfn main( {\n");
 
         assert!(symbols.is_none());
     }

@@ -138,7 +138,7 @@ mod tests {
         let path = PathBuf::from("main.nomo");
         let edits = formatting_edits_for_text(
             &path,
-            "package app . main\nfn main(){\nlet message:string=\"hi\"\n}\n",
+            "package app\nfn main(){\nlet message:string=\"hi\"\n}\n",
         )
         .unwrap();
 
@@ -158,14 +158,25 @@ mod tests {
         );
         assert_eq!(
             edits[0].new_text,
-            "package app.main\n\nfn main() {\n    let message: string = \"hi\"\n}\n"
+            "package app\n\nfn main() {\n    let message: string = \"hi\"\n}\n"
         );
+    }
+
+    #[test]
+    fn formatting_canonicalizes_explicit_void_compatibility_syntax() {
+        let path = PathBuf::from("main.nomo");
+        let text = "package app\n\nfn main() -> void {\n}\n";
+
+        let edits = formatting_edits_for_text(&path, text).unwrap();
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "package app\n\nfn main() {\n}\n");
     }
 
     #[test]
     fn formatting_returns_empty_edits_for_already_formatted_text() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app\n\nfn main() {\n    let message: string = \"hi\"\n}\n";
 
         let edits = formatting_edits_for_text(&path, text).unwrap();
 
@@ -176,7 +187,7 @@ mod tests {
     fn formatting_returns_none_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 
-        let edits = formatting_edits_for_text(&path, "package app.main\n\nfn main( {\n");
+        let edits = formatting_edits_for_text(&path, "package app\n\nfn main( {\n");
 
         assert!(edits.is_none());
     }
@@ -186,21 +197,21 @@ mod tests {
         let path = PathBuf::from("script.nomo");
         let edits = formatting_edits_for_text(
             &path,
-            "package app.main\nimport std.io\nlet message:string=\"hi\"\nio.println(message)\n",
+            "package app\nimport std.io\nlet message:string=\"hi\"\nio.println(message)\n",
         )
         .unwrap();
 
         assert_eq!(edits.len(), 1);
         assert_eq!(
             edits[0].new_text,
-            "package app.main\n\nimport std.io\n\nlet message: string = \"hi\"\nio.println(message)\n"
+            "package app\n\nimport std.io\n\nlet message: string = \"hi\"\nio.println(message)\n"
         );
     }
 
     #[test]
     fn range_formatting_formats_requested_region() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\nlet message:string=\"hi\"\n}\n";
+        let text = "package app\n\nfn main() {\nlet message:string=\"hi\"\n}\n";
 
         let edits = range_formatting_edits_for_text(
             &path,
@@ -226,8 +237,7 @@ mod tests {
     #[test]
     fn range_formatting_ignores_changes_outside_requested_region() {
         let path = PathBuf::from("main.nomo");
-        let text =
-            "package app . main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app . main\n\nfn main() {\n    let message: string = \"hi\"\n}\n";
 
         let edits = range_formatting_edits_for_text(
             &path,

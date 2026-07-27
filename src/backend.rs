@@ -19,6 +19,7 @@ use crate::navigation::{
     rename_for_document,
 };
 use crate::semantic;
+use crate::signature_help::signature_help_for_document;
 use crate::symbols::{document_symbols_for_text, workspace_symbols_for_roots};
 
 /// Keywords offered as completion items. Mirrors the v0.1 keyword set from the
@@ -162,6 +163,11 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(completion_options()),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![",".to_string()]),
+                    work_done_progress_options: Default::default(),
+                }),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -328,6 +334,23 @@ impl LanguageServer for Backend {
 
         let source_overrides = self.document_overrides();
         Ok(hover_for_document(
+            &path,
+            &text,
+            params.text_document_position_params.position,
+            &source_overrides,
+        ))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let Some(text) = self.document_text(&uri, &path) else {
+            return Ok(None);
+        };
+        let source_overrides = self.document_overrides();
+        Ok(signature_help_for_document(
             &path,
             &text,
             params.text_document_position_params.position,
@@ -1599,7 +1622,7 @@ mod tests {
 
         let diagnostics = diagnostics_for_text(
             &source,
-            "package app.main\n\nimport json.parser\n\nfn main() -> void {\n}\n",
+            "package app\n\nimport json.parser\n\nfn main() {\n}\n",
             &[],
         );
 
@@ -1611,7 +1634,7 @@ mod tests {
     #[test]
     fn diagnostics_include_code_description_links() {
         let path = PathBuf::from("main.nomo");
-        let diagnostics = diagnostics_for_text(&path, "package app.main\n@\n", &[]);
+        let diagnostics = diagnostics_for_text(&path, "package app\n@\n", &[]);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
@@ -1631,7 +1654,7 @@ mod tests {
     #[test]
     fn completion_includes_keywords_and_current_document_symbols() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nstruct User {\n    email: string\n}\n";
+        let text = "package app\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nstruct User {\n    email: string\n}\n";
 
         let items = completion_for_document(&path, Some(text), None, &[]);
 
@@ -1660,7 +1683,7 @@ mod tests {
     #[test]
     fn completion_uses_nested_block_doc_comments() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() -> void {\n}\n";
+        let text = "package app\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() {\n}\n";
 
         let items = completion_for_document(&path, Some(text), None, &[]);
         let nested = items.iter().find(|item| item.label == "nested").unwrap();
@@ -1677,8 +1700,7 @@ mod tests {
     fn completion_keeps_keywords_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
 
-        let items =
-            completion_for_document(&path, Some("package app.main\n\nfn main( {\n"), None, &[]);
+        let items = completion_for_document(&path, Some("package app\n\nfn main( {\n"), None, &[]);
 
         assert!(items.iter().any(|item| item.label == "fn"));
         assert!(!items.iter().any(|item| item.label == "main"));
@@ -1687,7 +1709,7 @@ mod tests {
     #[test]
     fn completion_includes_test_attribute_at_attribute_position() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n#[\nfn checks() -> void {\n}\n";
+        let text = "package app\n\n#[\nfn checks() {\n}\n";
 
         let items = completion_for_document(
             &path,
@@ -1717,15 +1739,15 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
+            "package hello.math\n\npub fn sub(a: i64, b: i64) -> i64 {\n    return a - b\n}\n",
         )
         .unwrap();
         let overlay =
-            "package app.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
+            "package hello.math\n\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n";
 
         let items = completion_for_document(
             &main,
@@ -1915,7 +1937,7 @@ mod tests {
             "[package]\nnamespace = \"fynn\"\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
         )
         .unwrap();
-        fs::write(dependency.join("src/main.nomo"), "package utils.main\n").unwrap();
+        fs::write(dependency.join("src/main.nomo"), "package utils\n").unwrap();
         fs::write(dependency.join("src/path.nomo"), "package utils.path\n").unwrap();
         let overlay_path = dependency.join("src/path/extra.nomo");
         fs::write(
@@ -1924,7 +1946,7 @@ mod tests {
         )
         .unwrap();
         let main = project.join("src/main.nomo");
-        let source = "package app.main\n\nimport local_\n\nfn main() -> void {\n}\n";
+        let source = "package hello\n\nimport local_\n\nfn main() {\n}\n";
         fs::write(&main, source).unwrap();
 
         let items = completion_for_document(
@@ -1951,7 +1973,7 @@ mod tests {
     fn code_actions_return_quick_fix_for_compiler_suggestion() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    io.println(\"Hello\")\n}\n";
+        let text = "package app\n\nfn main() {\n    io.println(\"Hello\")\n}\n";
         let diagnostics = diagnostics_for_text(&path, text, &[]);
 
         let actions = code_actions_for_text(&path, text, uri.clone(), &[], &diagnostics).unwrap();
@@ -2060,7 +2082,7 @@ mod tests {
         )
         .unwrap();
         let main_path = project.join("src/main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let total: i64 = join(40, 2)\n}\n";
+        let text = "package hello\n\nfn main() {\n    let total: i64 = join(40, 2)\n}\n";
         fs::write(&main_path, text).unwrap();
         let uri = Url::from_file_path(&main_path).unwrap();
         let diagnostics = diagnostics_for_text(&main_path, text, &[]);
@@ -2107,12 +2129,11 @@ mod tests {
         .unwrap();
         let main_path = project.join("src/main.nomo");
         let math_path = project.join("src/math.nomo");
-        let text =
-            "package app.main\n\nfn main() -> void {\n    let total: i64 = hidden(40, 2)\n}\n";
+        let text = "package hello\n\nfn main() {\n    let total: i64 = hidden(40, 2)\n}\n";
         fs::write(&main_path, text).unwrap();
         fs::write(
             math_path,
-            "package app.math\n\nfn hidden(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\nfn hidden(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
         let uri = Url::from_file_path(&main_path).unwrap();
@@ -2294,7 +2315,7 @@ mod tests {
     fn code_actions_return_empty_for_diagnostic_without_suggestions() {
         let path = PathBuf::from("main.nomo");
         let uri = Url::parse("file:///tmp/main.nomo").unwrap();
-        let text = "package app.main\n\nfn main() -> void {\n    let value: i32 = \"bad\"\n}\n";
+        let text = "package app\n\nfn main() {\n    let value: i32 = \"bad\"\n}\n";
         let diagnostics = diagnostics_for_text(&path, text, &[]);
 
         let actions = code_actions_for_text(&path, text, uri, &[], &diagnostics).unwrap();
@@ -2305,8 +2326,7 @@ mod tests {
     #[test]
     fn diagnostics_link_registered_ffi_docs() {
         let path = PathBuf::from("main.nomo");
-        let text =
-            "package app.main\n\nextern \"system\" {\n    fn puts(message: string) -> i32\n}\n";
+        let text = "package app\n\nextern \"system\" {\n    fn puts(message: string) -> i32\n}\n";
         let diagnostics = diagnostics_for_text(&path, text, &[]);
 
         assert_eq!(diagnostics.len(), 1);

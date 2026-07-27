@@ -1,171 +1,187 @@
 # nomo-lsp
 
-Language Server Protocol implementation for the [Nomo](https://github.com/nomo-lang)
-programming language, built on [tower-lsp](https://github.com/ebkalderon/tower-lsp).
+`nomo-lsp` is the shared Language Server Protocol implementation for the
+[Nomo programming language](https://www.nomo-lang.org). VS Code, Zed, and
+IntelliJ integrations use this server instead of maintaining separate language
+models.
 
-`nomo-lsp` is the single source of language intelligence for every Nomo editor
-integration. It links directly against the [`nomo`](https://github.com/nomo-lang/nomo)
-compiler crate (as a pinned Git dependency), so the diagnostics it reports are
-exactly the ones the compiler produces.
+## Status and compatibility
 
-## Features
+Nomo and this server are in **Preview**. They are suitable for language
+evaluation and controlled development workflows, not a stable production
+toolchain. Breaking changes may ship between timestamped snapshots.
 
-- Real-time diagnostics from the Nomo compiler front-end
-- Content-addressed session caches for diagnostics, completion, document
-  symbols, and semantic tokens, with dependency-aware edit invalidation
-- Versioned diagnostic publication so an older analysis cannot replace a newer edit
-- Manifest-aware dependency alias diagnostics matching `nomo check`
-- Full-document text synchronization (open / change / save / close)
-- Keyword, import path and semantic symbol completion
-- Hover for current-document and local project module declarations, including signatures and doc comments
-- Document symbols for current-document declarations, extern functions, interfaces, methods, fields and enum variants
-- Workspace symbols for project and workspace declarations
-- Go-to-definition for current-document and local project module declarations
-- Find references for current-document and local project module declarations
-- Rename for current-document and local project module identifier occurrences
-- Quick-fix code actions from compiler suggestions
-- Inlay hints for inferred `let` binding types and same-file function call parameter names
-- Semantic highlighting tokens
-- Full-document formatting through the shared `nomo fmt` formatter
+The latest packaged server is the prerelease
+[`v0.0.0-20260721120555`](https://github.com/nomo-lang/nomo-lsp/releases/tag/v0.0.0-20260721120555).
+Current `main` is newer and pins both `nomo` and `nomo-lsp-bridge` to compiler
+commit
+[`085da51`](https://github.com/nomo-lang/nomo/commit/085da513ff6c042bd00571c49a6eb061722acf6f).
+Use matching server and editor snapshots when evaluating unreleased syntax.
 
-## Role in the Nomo ecosystem
+There is no stable `v0.1.0` release. Read the
+[release gate](https://github.com/nomo-lang/rfcs/blob/main/RELEASE-GATE.md)
+before making maturity or platform claims.
 
-The editor extensions talk to this server rather than re-implementing the
-language:
+## What this repository owns
 
-- [`vscode-nomo`](https://github.com/nomo-lang/vscode-nomo)
-- [`zed-nomo`](https://github.com/nomo-lang/zed-nomo)
-- [`intellij-nomo`](https://github.com/nomo-lang/intellij-nomo)
+This repository owns:
 
-`nomo-lsp` depends on [`nomo`](https://github.com/nomo-lang/nomo); those editor
-clients depend on `nomo-lsp`.
+- LSP transport over standard input/output;
+- compiler-backed diagnostics and quick fixes;
+- completion, hover, signature help, symbols, navigation, references, and
+  rename;
+- semantic tokens and conservative inlay hints;
+- full-document formatting through the shared formatter;
+- open-buffer overlays and dependency-aware analysis caches;
+- editor-facing release smoke tests and packaged server archives.
 
-Completion, hover, document symbols, workspace symbols, go-to-definition,
-references, and rename are backed by the compiler crate's reusable `semantic`
-API. Code actions are backed by compiler diagnostics and suggestions. The LSP
-server only adapts compiler ranges, signatures and suggestions into LSP types.
+The compiler repository owns parsing, type checking, manifests, module graphs,
+canonical signatures, formatting rules, C99/WASM backends, Runtime, and the
+standard library. Syntax changes must land there first and then update the
+pinned revisions in this repository.
 
-The in-memory incremental session exposes `nomo.cache.stats` and
-`nomo.cache.clear` through `workspace/executeCommand`. Cache keys include the
-schema, toolchain version, host target, document contents, open-buffer overlays,
-and nearest manifest. An edit invalidates every cached result that declared the
-changed document as an input. Cache hits never bypass rename revalidation or
-compiler diagnostics.
+## Install and run
 
-## Requirements
+Download a timestamped archive from
+[GitHub Releases](https://github.com/nomo-lang/nomo-lsp/releases), verify it
+against `SHA256SUMS`, and put `nomo-lsp` (or `nomo-lsp.exe`) on `PATH`. Release
+archives also contain the matching `std/src` tree used for standard-library
+navigation.
 
-- A recent stable Rust toolchain (the crate uses edition 2024). The compiler
-  crates are fetched automatically from the pinned
-  [`nomo`](https://github.com/nomo-lang/nomo) Git revision.
+To build the current source:
 
-## Build and install
-
-Tagged releases provide `nomo-lsp` archives for Linux x86-64, macOS x86-64 and
-Apple silicon, and Windows x86-64 on the
-[GitHub Releases page](https://github.com/nomo-lang/nomo-lsp/releases). Extract
-the archive for your platform and place `nomo-lsp` (or `nomo-lsp.exe`) on your
-`PATH`. The archive also includes `std/src/*.nomo`, which keeps standard-library
-hover, workspace-symbol, and go-to-definition targets available after install.
-The release includes a checksum in the release's `SHA256SUMS` file.
-
-To build from source, clone this repository; Cargo fetches the pinned compiler
-revision automatically:
-
-```bash
+```sh
 git clone https://github.com/nomo-lang/nomo-lsp.git
 cd nomo-lsp
-cargo build --release
-# or install the binary onto your PATH so editors can find it:
-cargo install --path .
+cargo build --locked --release
+./target/release/nomo-lsp
 ```
 
-Most editor extensions look up `nomo-lsp` on the `PATH`. The server speaks LSP
-over stdio.
+The last command starts an LSP server over stdio. Normally an editor extension
+starts it and handles the protocol.
 
-Diagnostics use the same compiler API as project-level `nomo check`: for a file
-inside a project, `nomo-lsp` walks up to the nearest `nomo.toml`, reads declared
-dependency aliases, and accepts imports such as `import json.parser` only when
-`json` is declared in the manifest. Standalone files without a manifest keep the
-single-file `nomoc` behavior and only accept built-in `std.*` imports. When a
-diagnostic code is registered in the compiler's documented diagnostics registry,
-LSP diagnostics include a `codeDescription` link to the matching
-`docs/diagnostics/E####.md` reference page.
+## Canonical source model
 
-Formatting uses the same AST-based formatter as `nomo fmt`, applied as a single
-full-document edit against the editor's current open buffer. If the current text
-does not parse, the server returns no formatting edit and leaves diagnostics to
-the normal compiler diagnostic flow.
+Project analysis walks upward to the nearest `nomo.toml` and delegates package
+and module identity to the pinned compiler:
 
-Completion always includes v0.1 keywords. On `import` lines it adds supported
-`std.*` paths, local project modules, and dependency aliases/modules with source
-available. When the current document parses, completion also includes top-level
-declarations and methods from the current document or, inside a project, local
-`src/**/*.nomo` modules. Open editor buffers are used as overlays so unsaved
-module declarations can appear in completion. Standard import completion reads
-the shared toolchain `nomo-std` registry, including the native-boundary
-`std.ffi.CString` and `std.ffi.Opaque` types.
-
-Hover indexes the open document, imported toolchain `std/src/*.nomo` source,
-local project `src/**/*.nomo` modules, and public symbols from imported
-dependency modules with source available when a nearest `nomo.toml` is
-available. It shows the parsed signature plus any `///` or `/** */` item doc
-comment. Extern function declarations participate in the same hover path. Open
-editor buffers are used as overlays so unsaved module edits can participate in
-hover results.
-
-Document symbols use the same parsed declaration index to power editor outline
-views for top-level structs, enums, interfaces, constants, functions, extern
-functions, and methods. Struct fields, enum variants, and interface methods are
-nested under their parent type so outlines preserve the source model instead of
-flattening members into the top level.
-
-Workspace symbols index configured LSP workspace roots and the toolchain-owned
-standard-library source. A root that contains a Nomo workspace indexes every
-workspace member; otherwise the nearest project is indexed. Public symbols from
-dependency packages with source available are included. Results include current
-open-buffer overlays and are filtered by the client query.
-
-Go-to-definition resolves local bindings, declarations in the same document,
-toolchain standard-library source modules, local project modules under
-`src/**/*.nomo`, and public symbols from imported dependency modules with source
-available, including workspace member path dependencies.
-
-Find references compares declaration identity rather than raw identifier text.
-It follows local bindings and project declarations across every member of the
-current Nomo workspace while excluding shadowed parameters/variables and
-unrelated same-name declarations. Dependency package sources outside the
-workspace are definition targets but remain outside the editable reference set.
-Fields, struct literal labels, and methods use compiler-checked receiver types,
-so same-name members on different structs resolve to distinct declarations.
-Calls on constrained type parameters resolve to their declaring interface.
-
-Rename reuses those declaration-aware locations across the current document,
-local project modules, and dependent workspace members. The new name must be a
-valid Nomo identifier. When the original workspace checks successfully, the
-proposed in-memory edits are checked across every member and rejected if they
-introduce declaration collisions or other semantic errors.
-
-Code actions expose compiler suggestions as quick fixes, add missing concrete
-imports such as `import std.io` or `import std.io.println`, and can either
-update a mismatched package declaration or rename the module file so both agree.
-
-Inlay hints show conservative inferred type hints for `let` bindings without an
-explicit type annotation, such as `let label = "hi"` rendering `: string`.
-Hints are only produced when the type can be determined from syntax-level facts
-such as literals, casts, struct literals, and matching `if`/`match` branch
-types. Same-file function, extern function, and impl/interface method calls also
-receive parameter-name hints when the callee signature is available in the
-current parsed file.
-
-## Development
-
-```bash
-cargo run     # start the server (communicates over stdio)
-cargo test
+```toml
+[package]
+name = "hello-world"
 ```
 
-The release workflow and source build use the same pinned compiler revision from
-`Cargo.toml`; no sibling `nomo` checkout is required.
+```nomo
+package hello_world
+
+import std.io
+
+fn main() {
+    io.println("Hello, Nomo")
+}
+```
+
+The manifest name determines the lower-snake-case module root. `src/main.nomo`
+declares that root directly; it no longer appends `.main`. Ordinary void-return
+declarations omit `-> void`, while callable types such as
+`task fn(string) -> void` keep a complete return type.
+
+Dependency aliases are import names, not package declarations. Open buffers,
+workspace members, path dependencies, and toolchain standard-library sources
+are resolved through the compiler project context.
+
+## Verified capabilities
+
+The repository test and release gates currently exercise:
+
+- versioned diagnostics from the shared compiler, including documentation URLs
+  and compiler suggestions;
+- manifest-aware local modules, workspace members, dependency aliases, and
+  source overlays;
+- keyword, import-path, top-level symbol, and method completion;
+- hover and signature rendering for functions, methods, interfaces, externs,
+  fields, variants, and standard-library declarations;
+- document and workspace symbols;
+- go-to-definition, declaration-aware references, and checked rename;
+- quick fixes for compiler suggestions and missing imports;
+- semantic tokens and inferred-binding or parameter-name inlay hints;
+- full-document and range formatting through `nomo-fmt`;
+- initialize, diagnostics, completion, shutdown, and bounded latency in a real
+  server process.
+
+These checks demonstrate the tested Preview surface. They do not establish
+production readiness, exhaustive IDE compatibility, or stable protocol
+extensions.
+
+## Important boundaries
+
+- Standalone files use the compiler's single-file behavior; project-aware
+  dependency resolution requires a nearby `nomo.toml`.
+- Dependency packages can be definition targets, but sources outside the
+  current workspace are not editable rename/reference targets.
+- Inlay hints intentionally cover conservative syntax-level cases, not every
+  inferred compiler type.
+- Formatting returns no edit for invalid syntax; diagnostics remain the source
+  of parse errors.
+- The cache execute commands `nomo.cache.stats` and `nomo.cache.clear` are
+  Preview extensions and may change with snapshots.
+- Editor UI, marketplace packaging, and extension-specific fallback lexers
+  belong to their editor repositories.
+
+## Editor integrations
+
+- [VS Code](https://github.com/nomo-lang/vscode-nomo)
+- [Zed](https://github.com/nomo-lang/zed-nomo)
+- [IntelliJ Platform](https://github.com/nomo-lang/intellij-nomo)
+
+Each client must document the server/compiler commit it embeds or expects.
+Highlighting from a fallback grammar is not evidence that compiler-backed
+diagnostics, navigation, or formatting are available.
+
+## Development checks
+
+Use a recent stable Rust toolchain with Rust 2024 edition support:
+
+```sh
+cargo fmt --check
+python3 scripts/check_syntax_governance.py
+cargo clippy --locked -- -D warnings
+cargo test --locked
+cargo build --locked --release
+python3 scripts/lsp_release_gate.py \
+  --lsp target/release/nomo-lsp \
+  --output performance/results/lsp-release-gate.json
+```
+
+The release gate launches the built server and verifies initialize,
+diagnostics, completion, shutdown, and latency bounds. A compile-only result is
+not editor-integration evidence.
+
+When updating the compiler pin:
+
+1. merge the RFC-first compiler change and wait for its required CI;
+2. set both Git dependencies in `Cargo.toml` to the same immutable commit;
+3. update `Cargo.lock`;
+4. review every surface listed in [`AGENTS.md`](AGENTS.md);
+5. run the complete checks above on a signed feature branch.
+
+## Releases
+
+The release workflow builds Linux x86-64, macOS Intel and Apple silicon, and
+Windows x86-64 archives. It runs the real protocol gate, packages matching
+standard-library sources, emits checksums, and attests artifacts. Timestamped
+`v0.0.0-*` tags are prereleases.
+
+## Authoritative documentation
+
+- [Nomo specification](https://github.com/nomo-lang/rfcs/blob/main/en/SPEC.md)
+- [中文语言规范](https://github.com/nomo-lang/rfcs/blob/main/zh-CN/SPEC.md)
+- [RFC index](https://github.com/nomo-lang/rfcs)
+- [Roadmap](https://github.com/nomo-lang/rfcs/blob/main/ROADMAP.md)
+- [Compiler and CLI](https://github.com/nomo-lang/nomo)
+- [Shared contribution guide](https://github.com/nomo-lang/.github/blob/main/CONTRIBUTING.md)
+
+Repository-specific compiler-pin and verification rules are in
+[`AGENTS.md`](AGENTS.md).
 
 ## License
 

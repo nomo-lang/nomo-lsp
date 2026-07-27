@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     fn classifies_contextual_identifiers_for_lsp_highlighting() {
-        let source = "package app.main\n\nstruct User {\n    name: string\n}\n\nenum Status {\n    Ok\n    Err(string)\n}\n\nfn greet(user: User) -> void {\n    println(user.name)\n    Status.Ok\n    let other: User = User { name: \"Ada\" }\n}\n";
+        let source = "package app\n\nstruct User {\n    name: string\n}\n\nenum Status {\n    Ok\n    Err(string)\n}\n\nfn greet(user: User) {\n    println(user.name)\n    Status.Ok\n    let other: User = User { name: \"Ada\" }\n}\n";
         let raw = lex(Path::new("main.nomo"), source).unwrap();
         let mut context = SemanticContext::default();
         let mut classified = Vec::new();
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn emits_attribute_semantic_token() {
-        let source = "package app.main\n\n#[test]\nfn checks() -> void {\n}\n";
+        let source = "package app\n\n#[test]\nfn checks() {\n}\n";
         let data = tokens(Path::new("main.nomo"), source);
         let absolute = absolute_token_details(&data);
 
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn emits_semantic_tokens_for_requested_range() {
-        let source = "package app.main\n\nstruct User {\n    name: string\n}\n\nfn greet(user: User) -> void {\n    println(user.name)\n    let other: User = User { name: \"Ada\" }\n}\n";
+        let source = "package app\n\nstruct User {\n    name: string\n}\n\nfn greet(user: User) {\n    println(user.name)\n    let other: User = User { name: \"Ada\" }\n}\n";
         let range = Range {
             start: Position {
                 line: 6,
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn emits_public_and_mutable_semantic_token_modifiers() {
-        let source = "package app.main\n\npub fn main() -> void {\n    let mut value: i64 = 1\n}\n";
+        let source = "package app\n\npub fn main() {\n    let mut value: i64 = 1\n}\n";
         let data = tokens(Path::new("main.nomo"), source);
         let absolute = absolute_token_details(&data);
 

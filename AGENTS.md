@@ -33,6 +33,7 @@ Run from the repository root:
 
 ```sh
 cargo fmt --check
+python3 scripts/check_syntax_governance.py
 cargo clippy --locked -- -D warnings
 cargo test --locked
 cargo build --locked --release

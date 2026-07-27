@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn hover_returns_function_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let text = "package app\n\n/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn hover_returns_struct_signature_and_block_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/** User record.\n * Stores identity fields.\n */\npub struct User {\n    pub id: string\n}\n\nfn main() -> void {\n    let user: User = User { id: \"1\" }\n}\n";
+        let text = "package app\n\n/** User record.\n * Stores identity fields.\n */\npub struct User {\n    pub id: string\n}\n\nfn main() {\n    let user: User = User { id: \"1\" }\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn hover_returns_nested_block_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() -> void {\n}\n\nfn main() -> void {\n    nested()\n}\n";
+        let text = "package app\n\n/**\n * Outer docs.\n * /* Nested docs. */\n * Still outer.\n */\npub fn nested() {\n}\n\nfn main() {\n    nested()\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn hover_returns_method_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nstruct User {\n    email: string\n}\n\nimpl User {\n    /// Reads the stored email.\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() -> void {\n    let user: User = User { email: \"hi\" }\n    let email: string = user.email()\n}\n";
+        let text = "package app\n\nstruct User {\n    email: string\n}\n\nimpl User {\n    /// Reads the stored email.\n    pub fn email(self) -> string {\n        return self.email\n    }\n}\n\nfn main() {\n    let user: User = User { email: \"hi\" }\n    let email: string = user.email()\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn hover_returns_extern_function_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nextern \"C\" {\n    /// Writes a C string.\n    fn puts(message: string) -> i32\n}\n\nfn main() -> void {\n    unsafe {\n        puts(\"hello\")\n    }\n}\n";
+        let text = "package app\n\nextern \"C\" {\n    /// Writes a C string.\n    fn puts(message: string) -> i32\n}\n\nfn main() {\n    unsafe {\n        puts(\"hello\")\n    }\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn hover_returns_interface_method_signature_and_doc_comment() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\n/// Display contract.\npub interface Display {\n    /// Converts to text.\n    fn to_string(self) -> string\n}\n";
+        let text = "package app\n\n/// Display contract.\npub interface Display {\n    /// Converts to text.\n    fn to_string(self) -> string\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn hover_returns_none_for_unknown_identifier() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let message: string = \"hi\"\n}\n";
+        let text = "package app\n\nfn main() {\n    let message: string = \"hi\"\n}\n";
 
         let hover = hover_for_text(
             &path,
@@ -276,7 +276,7 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let dep_module = dependency.join("src/path.nomo");
-        let main_source = "package app.main\n\nimport local_utils.path\n\nfn main() -> void {\n    let total: i64 = join(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport local_utils.path\n\nfn main() {\n    let total: i64 = join(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &dep_module,
@@ -316,11 +316,11 @@ mod tests {
         .unwrap();
         let main = project.join("src/main.nomo");
         let math = project.join("src/math.nomo");
-        let main_source = "package app.main\n\nimport app.math\n\nfn main() -> void {\n    let total: i64 = add(1, 2)\n}\n";
+        let main_source = "package hello\n\nimport hello.math\n\nfn main() {\n    let total: i64 = add(1, 2)\n}\n";
         fs::write(&main, main_source).unwrap();
         fs::write(
             &math,
-            "package app.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
+            "package hello.math\n\n/// Adds numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\n",
         )
         .unwrap();
 
@@ -355,7 +355,7 @@ mod tests {
         )
         .unwrap();
         let main = project.join("src/main.nomo");
-        let main_source = "package app.main\n\nimport std.string.split\n\nfn main() -> void {\n    let parts: Array<string> = split(\"a\", \",\")\n}\n";
+        let main_source = "package hello\n\nimport std.string.split\n\nfn main() {\n    let parts: Array<string> = split(\"a\", \",\")\n}\n";
         fs::write(&main, main_source).unwrap();
 
         let line = main_source.lines().nth(5).unwrap();

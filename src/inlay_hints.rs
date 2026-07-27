@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn inlay_hints_include_unannotated_let_literal_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let message = \"hi\"\n    let count = 1\n    let ok = true\n    let et = 'x'\n    let mut mutable = 3.14\n    let explicit: string = \"shown in source\"\n}\n";
+        let text = "package app\n\nfn main() {\n    let message = \"hi\"\n    let count = 1\n    let ok = true\n    let et = 'x'\n    let mut mutable = 3.14\n    let explicit: string = \"shown in source\"\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn inlay_hints_include_nested_and_expression_types() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nstruct Label {\n    value: string\n}\n\nfn main() -> void {\n    for {\n        let label = Label { value: \"hi\" }\n        let casted = 1 as i32\n        let compared = 1 < 2\n        let uncertain = load()\n        break\n    }\n}\n";
+        let text = "package app\n\nstruct Label {\n    value: string\n}\n\nfn main() {\n    for {\n        let label = Label { value: \"hi\" }\n        let casted = 1 as i32\n        let compared = 1 < 2\n        let uncertain = load()\n        break\n    }\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn inlay_hints_cover_arrays_c_style_loops_and_structured_task_bodies() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nsuspend fn main() -> void {\n    let values = [1, 2]\n    let first = [1, 2][0]\n    for let i = 0; i < 1; i++ {\n        let inside = true\n    }\n    task.scope {\n        let scoped = \"ready\"\n        task.deadline(time.duration_millis(5)) {\n            let bounded = 1\n        }\n        task.select {\n            task.receive(messages) => message {\n                let received = 'r'\n            }\n            task.sleep(time.duration_millis(50)) => timeout {\n                let elapsed = 3.14\n            }\n        }\n    }\n}\n";
+        let text = "package app\n\nsuspend fn main() {\n    let values = [1, 2]\n    let first = [1, 2][0]\n    for let i = 0; i < 1; i++ {\n        let inside = true\n    }\n    task.scope {\n        let scoped = \"ready\"\n        task.deadline(time.duration_millis(5)) {\n            let bounded = 1\n        }\n        task.select {\n            task.receive(messages) => message {\n                let received = 'r'\n            }\n            task.sleep(time.duration_millis(50)) => timeout {\n                let elapsed = 3.14\n            }\n        }\n    }\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn inlay_hints_include_same_file_function_parameter_names() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn add(left: i64, right: i64) -> i64 {\n    return left + right\n}\n\nfn main() -> void {\n    let total = add(1, 2)\n    let copied = add(left, right)\n}\n";
+        let text = "package app\n\nfn add(left: i64, right: i64) -> i64 {\n    return left + right\n}\n\nfn main() {\n    let total = add(1, 2)\n    let copied = add(left, right)\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn inlay_hints_include_same_file_extern_function_parameter_names() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nfn main() -> void {\n    let status = puts(\"hi\")\n}\n";
+        let text = "package app\n\nextern \"C\" {\n    fn puts(message: string) -> i32\n}\n\nfn main() {\n    let status = puts(\"hi\")\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn inlay_hints_include_same_file_method_parameter_names() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nstruct Counter {\n    value: i64\n}\n\nimpl Counter {\n    fn add(self, delta: i64) -> i64 {\n        return self.value + delta\n    }\n}\n\ninterface Writer {\n    fn write(self, message: string) -> void\n}\n\nfn main() -> void {\n    let counter = Counter { value: 1 }\n    let value = counter.add(2)\n    writer.write(\"hi\")\n}\n";
+        let text = "package app\n\nstruct Counter {\n    value: i64\n}\n\nimpl Counter {\n    fn add(self, delta: i64) -> i64 {\n        return self.value + delta\n    }\n}\n\ninterface Writer {\n    fn write(self, message: string)\n}\n\nfn main() {\n    let counter = Counter { value: 1 }\n    let value = counter.add(2)\n    writer.write(\"hi\")\n}\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn inlay_hints_respect_requested_range() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main() -> void {\n    let first = \"hi\"\n    let second = 1\n}\n";
+        let text = "package app\n\nfn main() {\n    let first = \"hi\"\n    let second = 1\n}\n";
         let range = Range {
             start: Position {
                 line: 4,
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn inlay_hints_return_empty_for_invalid_source() {
         let path = PathBuf::from("main.nomo");
-        let text = "package app.main\n\nfn main( {\n";
+        let text = "package app\n\nfn main( {\n";
 
         let hints = inlay_hints_for_text(&path, text, full_document_range(text));
 

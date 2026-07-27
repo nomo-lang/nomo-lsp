@@ -112,8 +112,8 @@ def main() -> int:
             encoding="utf-8",
         )
         text = (
-            "package app.main\n\n"
-            "fn main() -> void {\n"
+            "package lsp\n\n"
+            "fn main() {\n"
             '    let value: i64 = "not-an-integer"\n'
             "}\n"
         )
@@ -207,8 +207,8 @@ def main() -> int:
                 raise RuntimeError("nomo-lsp returned no warm completion items")
 
             valid_text = (
-                "package app.main\n\n"
-                "fn main() -> void {\n"
+                "package lsp\n\n"
+                "fn main() {\n"
                 "    let value: i64 = 1\n"
                 "}\n"
             )
